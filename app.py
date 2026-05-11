@@ -1018,7 +1018,7 @@ def main():
             if us_rows:
                 us_df = pd.DataFrame(us_rows)
                 st.dataframe(
-                    us_df.style.applymap(
+                    us_df.style.map(
                         lambda v: "color: #ef5350" if isinstance(v, float) and v < 0
                         else ("color: #26a69a" if isinstance(v, float) and v > 0 else ""),
                         subset=["漲跌幅(%)"],
