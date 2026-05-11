@@ -2,9 +2,9 @@ name: 每日盤後分析報告
 
 on:
   schedule:
-    # 台灣時間 16:30 = UTC 08:30
-    - cron: '30 8 * * 1-5'
-  workflow_dispatch:  # 允許手動觸發
+    # 台灣時間 14:30 = UTC 06:30
+    - cron: '30 6 * * 1-5'
+  workflow_dispatch:  # 允許手動觸發測試
 
 jobs:
   daily-report:
@@ -28,5 +28,7 @@ jobs:
 
       - name: Run daily report
         env:
-          LINE_NOTIFY_TOKEN: ${{ secrets.LINE_NOTIFY_TOKEN }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          REPORT_TO: ${{ secrets.GMAIL_USER }}
         run: python scripts/daily_report.py

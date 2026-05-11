@@ -1,41 +1,43 @@
 # -*- coding: utf-8 -*-
 """
-每日盤後分析報告 - LINE Notify 推送
-由 GitHub Actions 自動執行（台灣時間 16:30 盤後）
+每日盤後分析報告 - Gmail 寄送
+由 GitHub Actions 自動執行（台灣時間 14:30 盤後）
 """
 
 import os
 import sys
 import json
-import requests
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import date, datetime
+from pathlib import Path
 
-# Windows console UTF-8 fix
 if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-from pathlib import Path
 
-# 確保可以 import 上層模組
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
-def send_line_notify(token: str, message: str) -> bool:
+def send_email(gmail_user: str, app_password: str, to_addr: str, subject: str, body: str) -> bool:
     try:
-        resp = requests.post(
-            "https://notify-api.line.me/api/notify",
-            headers={"Authorization": f"Bearer {token}"},
-            data={"message": message},
-            timeout=10,
-        )
-        return resp.status_code == 200
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = gmail_user
+        msg["To"] = to_addr
+        msg.attach(MIMEText(body, "plain", "utf-8"))
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(gmail_user, app_password)
+            server.sendmail(gmail_user, to_addr, msg.as_string())
+        return True
     except Exception as e:
-        print(f"LINE Notify 失敗: {e}")
+        print(f"Email 寄送失敗: {e}")
         return False
 
 
 def load_model_snapshot() -> list:
-    """讀取最新快照（若有）"""
     snapshot_file = Path("tw_quant_data/snapshots.json")
     if not snapshot_file.exists():
         return []
@@ -49,7 +51,6 @@ def load_model_snapshot() -> list:
 
 
 def load_portfolio() -> dict:
-    """讀取持倉"""
     pf_file = Path("tw_quant_data/portfolio.json")
     if not pf_file.exists():
         return {}
@@ -60,7 +61,6 @@ def load_portfolio() -> dict:
 
 
 def fetch_us_summary() -> str:
-    """抓取美股重要指數簡報"""
     try:
         import yfinance as yf
         indices = {"^GSPC": "S&P500", "^IXIC": "那斯達克", "^SOX": "費城半導體", "^VIX": "VIX恐慌"}
@@ -85,51 +85,53 @@ def build_report() -> str:
     portfolio = load_portfolio()
 
     lines = [
-        f"\n📈 台股盤後分析報告",
-        f"📅 {today}  ⏰ {now}",
-        "━━━━━━━━━━━━━━━━━━",
+        f"台股盤後分析報告",
+        f"日期：{today}  時間：{now}",
+        "=" * 30,
     ]
 
-    # 美股概況
-    lines.append("\n🌍 美股昨收概況")
+    lines.append("\n【美股昨收概況】")
     lines.append(fetch_us_summary())
 
-    # TOP 5 推薦（從快照取）
     if rows:
         sorted_rows = sorted(rows, key=lambda r: r.get("prob20", 0), reverse=True)[:5]
-        lines.append("\n⭐ 模型TOP5（1月漲機率）")
+        lines.append("\n【模型 TOP5（1月漲機率）】")
         for i, r in enumerate(sorted_rows, 1):
             prob = r.get("prob20", 0)
             name = r.get("name", r.get("ticker", ""))
             ticker = r.get("ticker", "")
             lines.append(f"  {i}. {ticker} {name}: {prob:.0f}%")
     else:
-        lines.append("\n⭐ TOP5：無快照資料（請在平台保存快照）")
+        lines.append("\n【TOP5】：無快照資料（請在平台保存快照）")
 
-    # 持倉概況
     if portfolio:
-        lines.append(f"\n💼 持倉 {len(portfolio)} 檔")
+        lines.append(f"\n【持倉 {len(portfolio)} 檔】")
         for ticker, h in list(portfolio.items())[:5]:
             lines.append(f"  • {ticker} {h.get('name', '')} — 買入 ${h.get('buy_price', 0):.1f}")
 
-    lines.append("\n━━━━━━━━━━━━━━━━━━")
-    lines.append("🔍 詳細分析請開啟平台")
-    lines.append("⚠️ 本報告僅供參考，非投資建議")
+    lines.append("\n" + "=" * 30)
+    lines.append("詳細分析請開啟平台")
+    lines.append("本報告僅供參考，非投資建議")
 
     return "\n".join(lines)
 
 
 def main():
-    token = os.environ.get("LINE_NOTIFY_TOKEN", "")
-    if not token:
-        print("⚠️ 未設定 LINE_NOTIFY_TOKEN，僅輸出報告內容")
-        print(build_report())
+    gmail_user   = os.environ.get("GMAIL_USER", "")
+    app_password = os.environ.get("GMAIL_APP_PASSWORD", "")
+    to_addr      = os.environ.get("REPORT_TO", gmail_user)
+
+    report  = build_report()
+    subject = f"台股盤後報告 {date.today().strftime('%Y/%m/%d')}"
+
+    print(report)
+
+    if not gmail_user or not app_password:
+        print("\n⚠️ 未設定 GMAIL_USER / GMAIL_APP_PASSWORD，僅輸出報告，不寄送")
         return
 
-    report = build_report()
-    print(report)
-    ok = send_line_notify(token, report)
-    print("✅ 已推送到 LINE" if ok else "❌ 推送失敗")
+    ok = send_email(gmail_user, app_password, to_addr, subject, report)
+    print("✅ 報告已寄出" if ok else "❌ 寄送失敗")
 
 
 if __name__ == "__main__":
