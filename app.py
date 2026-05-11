@@ -58,6 +58,33 @@ st.set_page_config(
 )
 
 # ============================================================
+# 密碼保護
+# ============================================================
+
+def _check_password() -> bool:
+    try:
+        correct = st.secrets["auth"]["password"]
+    except Exception:
+        return True  # 本機沒設 secrets 時跳過驗證
+
+    if st.session_state.get("_authenticated"):
+        return True
+
+    with st.container():
+        st.title("台股分析平台")
+        pwd = st.text_input("請輸入密碼", type="password", key="_pwd_input")
+        if st.button("登入"):
+            if pwd == correct:
+                st.session_state["_authenticated"] = True
+                st.rerun()
+            else:
+                st.error("密碼錯誤")
+    return False
+
+if not _check_password():
+    st.stop()
+
+# ============================================================
 # Session State 初始化
 # ============================================================
 
