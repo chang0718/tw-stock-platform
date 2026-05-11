@@ -1,0 +1,302 @@
+"""
+新聞 RSS 爬蟲 + 關鍵字情緒分析
+來源: Yahoo 財經 / 鉅亨網 / MoneyDJ
+零費用，1 小時本機快取
+需安裝: pip install feedparser
+"""
+
+import json
+import time
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Dict, List, Optional
+
+try:
+    import feedparser
+    _HAS_FEEDPARSER = True
+except ImportError:
+    _HAS_FEEDPARSER = False
+
+_CACHE_FILE = Path("tw_quant_data/news_cache.json")
+_TTL = 3600  # 1小時
+
+_POS_KW = [
+    "創新高", "成長", "獲利", "上漲", "看好", "營收增加",
+    "突破", "強勢", "推薦", "買進", "升級", "擴廠", "接單",
+    "需求強", "表現亮眼", "超預期", "配息", "新高", "轉機",
+    "毛利率提升", "法說會", "獲利成長",
+]
+_NEG_KW = [
+    "下跌", "虧損", "衰退", "不利", "示警", "減少", "縮水",
+    "下修", "賣出", "裁員", "下滑", "轉弱", "疲弱",
+    "獲利下降", "不如預期", "警示", "停牌", "看淡",
+    "毛利率下滑", "營收衰退", "展望保守",
+]
+
+_GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q={query}&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
+_MONEYDJ_RSS     = "https://www.moneydj.com/RSS/SubClass_Article.aspx?svc=NW&subclass=MB01"
+
+# 總體經濟 / 地緣政治關鍵字（英文用 en 搜尋）
+_MACRO_QUERIES = [
+    ("川普 關稅 貿易",    "貿易/關稅"),
+    ("聯準會 Fed 利率",  "Fed/利率"),
+    ("中美 貿易戰",      "中美關係"),
+    ("台海 地緣政治",    "地緣風險"),
+    ("NVIDIA AMD 財報",  "半導體大廠"),
+    ("AI 人工智慧 投資", "AI趨勢"),
+    ("通膨 CPI 景氣",   "總經指標"),
+]
+
+
+class NewsAnalyzer:
+
+    def __init__(self):
+        self._cache = self._load()
+
+    # ── 快取 ──────────────────────────────────────────────────────
+
+    def _load(self) -> dict:
+        try:
+            if _CACHE_FILE.exists():
+                return json.loads(_CACHE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+        return {}
+
+    def _flush(self):
+        try:
+            _CACHE_FILE.write_text(
+                json.dumps(self._cache, ensure_ascii=False, default=str),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+    def _hit(self, key: str):
+        e = self._cache.get(key)
+        if e and (time.time() - e.get("ts", 0)) < _TTL:
+            return e["data"]
+        return None
+
+    def _put(self, key: str, data):
+        self._cache[key] = {"ts": time.time(), "data": data}
+        self._flush()
+
+    # ── 爬蟲 ──────────────────────────────────────────────────────
+
+    def fetch_news(self, query: str, days: int = 7) -> List[Dict]:
+        """
+        爬取新聞，1 小時快取。
+        來源優先順序：
+        1. Google News RSS（繁中搜尋，最穩定）
+        2. MoneyDJ RSS（台股財經，過濾 query 關鍵字）
+        """
+        if not _HAS_FEEDPARSER:
+            return []
+
+        key = f"news:{query}:{days}"
+        cached = self._hit(key)
+        if cached is not None:
+            return cached
+
+        import urllib.parse
+        cutoff  = datetime.now() - timedelta(days=days)
+        results = []
+
+        def _parse_entry(entry, src):
+            title   = entry.get("title", "")
+            summary = entry.get("summary", "")
+            try:
+                pub = (
+                    datetime(*entry.published_parsed[:6])
+                    if hasattr(entry, "published_parsed") and entry.published_parsed
+                    else datetime.now()
+                )
+            except Exception:
+                pub = datetime.now()
+            if pub < cutoff:
+                return None
+            return {
+                "title":     title,
+                "link":      entry.get("link", ""),
+                "published": pub.strftime("%Y-%m-%d %H:%M"),
+                "source":    src,
+                "summary":   summary[:200],
+            }
+
+        # 1. Google News RSS（query 已內嵌於 URL，不需再過濾）
+        try:
+            gurl = _GOOGLE_NEWS_RSS.format(
+                query=urllib.parse.quote(f"{query} 股票")
+            )
+            feed = feedparser.parse(gurl)
+            for entry in feed.entries[:30]:
+                item = _parse_entry(entry, "google_news")
+                if item:
+                    results.append(item)
+        except Exception:
+            pass
+
+        # 2. MoneyDJ RSS（財經通用，關鍵字過濾）
+        if len(results) < 5:
+            try:
+                feed = feedparser.parse(_MONEYDJ_RSS)
+                for entry in feed.entries:
+                    title   = entry.get("title", "")
+                    summary = entry.get("summary", "")
+                    if query and query not in title and query not in summary:
+                        continue
+                    item = _parse_entry(entry, "moneydj")
+                    if item:
+                        results.append(item)
+            except Exception:
+                pass
+
+        results.sort(key=lambda x: x["published"], reverse=True)
+        self._put(key, results[:20])
+        return results[:20]
+
+    # ── 情緒分析 ──────────────────────────────────────────────────
+
+    def analyze_sentiment(self, news_list: List[Dict]) -> Dict:
+        """關鍵字加權情緒分析"""
+        pos = neg = neu = 0
+        pk: List[str] = []
+        nk: List[str] = []
+
+        for item in news_list:
+            text = item["title"] + " " + item.get("summary", "")
+            p = sum(1 for w in _POS_KW if w in text)
+            n = sum(1 for w in _NEG_KW if w in text)
+            if p > n:
+                pos += 1
+                pk += [w for w in _POS_KW if w in text]
+            elif n > p:
+                neg += 1
+                nk += [w for w in _NEG_KW if w in text]
+            else:
+                neu += 1
+
+        total = max(len(news_list), 1)
+        score = round((pos - neg) / total, 3)
+
+        if score > 0.2:
+            label = "正面"
+            label_color = "🟢"
+        elif score < -0.2:
+            label = "負面"
+            label_color = "🔴"
+        else:
+            label = "中性"
+            label_color = "🟡"
+
+        return {
+            "label": label,
+            "label_color": label_color,
+            "score": score,
+            "positive": pos,
+            "negative": neg,
+            "neutral": neu,
+            "total": total,
+            "pos_keywords": list(set(pk))[:5],
+            "neg_keywords": list(set(nk))[:5],
+            "data_source": "🔧 關鍵字分析（免費）",
+        }
+
+    def get_stock_news_sentiment(self, ticker: str, name: str) -> Dict:
+        """個股新聞情緒（優先用 yfinance，再用 RSS 備援）"""
+        news = []
+
+        # 1. 嘗試 yfinance 新聞
+        try:
+            import yfinance as yf
+            yf_ticker = yf.Ticker(f"{ticker}.TW")
+            yf_news = yf_ticker.news or []
+            for item in yf_news[:15]:
+                title   = item.get("title", "")
+                link    = item.get("link", "") or item.get("url", "")
+                pub_ts  = item.get("providerPublishTime", 0)
+                pub_str = (
+                    datetime.fromtimestamp(pub_ts).strftime("%Y-%m-%d %H:%M")
+                    if pub_ts else datetime.now().strftime("%Y-%m-%d %H:%M")
+                )
+                if title:
+                    news.append({
+                        "title":     title,
+                        "link":      link,
+                        "published": pub_str,
+                        "source":    "yfinance",
+                        "summary":   item.get("summary", "")[:200],
+                    })
+        except Exception:
+            pass
+
+        # 2. RSS 備援（yfinance 沒有足夠新聞時）
+        if len(news) < 3:
+            rss_news = self.fetch_news(name) if name else []
+            if not rss_news:
+                rss_news = self.fetch_news(ticker)
+            news.extend(rss_news)
+
+        # 去重（依標題前30字元）
+        seen = set()
+        deduped = []
+        for n in news:
+            key = n["title"][:30]
+            if key not in seen:
+                seen.add(key)
+                deduped.append(n)
+
+        return {
+            "sentiment":      self.analyze_sentiment(deduped[:15]),
+            "news":           deduped[:10],
+            "has_feedparser": _HAS_FEEDPARSER,
+        }
+
+    def fetch_macro_events(self) -> List[Dict]:
+        """
+        抓取總體經濟 / 地緣政治重大事件（RSS，1 小時快取）
+        回傳: [{category, title, link, published, source}]
+        """
+        if not _HAS_FEEDPARSER:
+            return []
+
+        key = "macro_events"
+        cached = self._hit(key)
+        if cached is not None:
+            return cached
+
+        import urllib.parse
+        cutoff  = datetime.now() - timedelta(days=14)
+        results = []
+
+        for query, category in _MACRO_QUERIES:
+            try:
+                gurl = _GOOGLE_NEWS_RSS.format(query=urllib.parse.quote(query))
+                feed = feedparser.parse(gurl)
+                for entry in feed.entries[:5]:
+                    title = entry.get("title", "")
+                    try:
+                        pub = (
+                            datetime(*entry.published_parsed[:6])
+                            if hasattr(entry, "published_parsed") and entry.published_parsed
+                            else datetime.now()
+                        )
+                    except Exception:
+                        pub = datetime.now()
+                    if pub < cutoff:
+                        continue
+                    results.append({
+                        "category":  category,
+                        "title":     title,
+                        "link":      entry.get("link", ""),
+                        "published": pub.strftime("%Y-%m-%d %H:%M"),
+                        "source":    "google_news",
+                    })
+            except Exception:
+                continue
+
+        results.sort(key=lambda x: x["published"], reverse=True)
+        out = results[:30]
+        self._put(key, out)
+        return out

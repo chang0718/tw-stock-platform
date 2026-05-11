@@ -1,0 +1,32 @@
+name: 每日盤後分析報告
+
+on:
+  schedule:
+    # 台灣時間 16:30 = UTC 08:30
+    - cron: '30 8 * * 1-5'
+  workflow_dispatch:  # 允許手動觸發
+
+jobs:
+  daily-report:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install requests yfinance pandas
+
+      - name: Create data directory
+        run: mkdir -p tw_quant_data
+
+      - name: Run daily report
+        env:
+          LINE_NOTIFY_TOKEN: ${{ secrets.LINE_NOTIFY_TOKEN }}
+        run: python scripts/daily_report.py

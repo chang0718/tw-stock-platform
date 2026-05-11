@@ -1,0 +1,23 @@
+# 快取與本機資料（不上傳雲端）
+tw_quant_data/
+
+# Streamlit secrets（含 API key，絕對不上傳）
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+*.egg-info/
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
