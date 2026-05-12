@@ -61,9 +61,14 @@
 ### ✅ 已完成（2026-05-12）
 
 - [x] **廢棄檔清理**：刪除未使用的 `financials.py`、`news.py`，更新 `pack.ps1`
-- [x] **冷啟動腳本**：新增 `scripts/init_price_history.py`（PR: feat/init-price-history）
-- [x] **雙擊啟動**：新增 `start.bat`（PR: feat/start-bat）
-- [x] **TOP5 每日報告**：新增 `scripts/run_model.py`，更新 `daily_report.yml`（PR: feat/fix-daily-report-top5）
+- [x] **冷啟動腳本**：新增 `scripts/init_price_history.py`
+- [x] **雙擊啟動**：新增 `start.bat`
+- [x] **TOP5 每日報告**：新增 `scripts/run_model.py`，更新 `daily_report.yml`
+- [x] **SSL 修正**：`utils.py` → `session.verify = False`（台灣政府 API 憑證缺少 Subject Key Identifier）
+- [x] **行情 / 公司清單分離**：即使 TWSE 盤後 API 空白也能載入公司名稱
+- [x] **`_probit` 修正**：移除不存在的 `math.erfinv`，改用 Acklam rational approximation
+- [x] **pytest 測試**：`tests/test_quant_model.py` + `tests/test_data_loader.py`（52 tests 全過）
+- [x] **docs/ 文件**：7 份系統文件（`docs/00` 到 `docs/06`）
 
 ### 🔴 高優先（影響使用體驗）
 
@@ -92,6 +97,12 @@
 6. **模型水泥股問題**：TOP5 仍可能被無基本面小股票佔據，需調整評分權重
 
 7. **Streamlit Cloud 資料持久化**：自選股、持倉在雲端重啟後消失，需外部儲存（Google Sheets、Supabase 等）
+
+   **自選股儲存說明**：
+   - **本機執行**：`tw_quant_data/watchlist.json` 持久存在磁碟，關閉平台後資料仍在
+   - **Streamlit Cloud**：檔案系統為 ephemeral，每次重啟（約每 7 天或閒置後）`watchlist.json` 消失
+   - `tw_quant_data/` 在 `.gitignore` 裡，不會上傳 GitHub，也不會從雲端同步回來
+   - **解法**（未來）：改用 Google Sheets API 或 Supabase 儲存自選股清單
 
 8. **美股資料錯誤**：yfinance 延遲 15 分鐘，部分美股指數資料有問題，需排查
 
