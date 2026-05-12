@@ -83,27 +83,32 @@ class QuantModel:
     # ── 技術指標（本機快照）────────────────────────────────────────
 
     def calculate_technical_metrics(
-        self, ticker: str, close: float, change_pct: float = 0
+        self, ticker: str, close: Optional[float], change_pct: float = 0
     ) -> Dict:
-        if ticker in self.price_history and len(self.price_history[ticker]) >= 20:
+        if (
+            close is not None
+            and ticker in self.price_history
+            and len(self.price_history[ticker]) >= 20
+        ):
             history = self.price_history[ticker][-60:]
-            prices  = [p["close"] for p in history]
-            ma20    = np.mean(prices[-20:])
-            m20     = ((close - ma20) / ma20) * 100
-            m60     = (
-                ((close - np.mean(prices[-60:])) / np.mean(prices[-60:])) * 100
-                if len(prices) >= 60 else m20
-            )
-            vol = (np.std(prices[-20:]) / ma20) * 100
-            return {
-                "m20": round(m20, 2), "m60": round(m60, 2),
-                "volatility": round(vol, 2), "change_pct": change_pct,
-                "tech_data_source": "✅ 本機快照",
-            }
+            prices  = [p["close"] for p in history if p.get("close") is not None]
+            if len(prices) >= 20 and np.mean(prices[-20:]) > 0:
+                ma20 = np.mean(prices[-20:])
+                m20  = ((close - ma20) / ma20) * 100
+                m60  = (
+                    ((close - np.mean(prices[-60:])) / np.mean(prices[-60:])) * 100
+                    if len(prices) >= 60 else m20
+                )
+                vol = (np.std(prices[-20:]) / ma20) * 100
+                return {
+                    "m20": round(m20, 2), "m60": round(m60, 2),
+                    "volatility": round(vol, 2), "change_pct": change_pct,
+                    "tech_data_source": "✅ 本機快照",
+                }
         return {
             "m20": None, "m60": None, "volatility": None,
             "change_pct": change_pct,
-            "tech_data_source": "⚠️ 歷史資料不足",
+            "tech_data_source": "⚠️ 歷史資料不足（每日載入後逐步累積）",
         }
 
     # ── 基本面（接收預載數據）──────────────────────────────────────
@@ -349,9 +354,9 @@ class QuantModel:
     ) -> Dict:
         ticker     = row["ticker"]
         daily      = row.get("daily", {})
-        close      = daily.get("close", 100)
-        change_pct = daily.get("change_pct", 0)
-        volume     = daily.get("volume", 1000)
+        close      = daily.get("close")      # None = 無資料，不填假值
+        change_pct = daily.get("change_pct") or 0.0
+        volume     = daily.get("volume")     or 0
 
         tech  = self.calculate_technical_metrics(ticker, close, change_pct)
         fund  = self.calculate_fundamental_metrics(fundamental)

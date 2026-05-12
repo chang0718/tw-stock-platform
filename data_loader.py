@@ -275,11 +275,11 @@ class MarketDataLoader:
                 "其他"
             ).strip()
             
-            # 取得行情資料,如果沒有則使用預設值
+            # 取得行情資料，無資料時保留 None，不填假值
             daily = daily_map.get(ticker, {
-                "close": 100,  # 預設收盤價
-                "change_pct": 0,
-                "volume": 1000,
+                "close": None,
+                "change_pct": None,
+                "volume": None,
             })
             
             result.append({
@@ -311,8 +311,8 @@ class MarketDataLoader:
                 "market": market,
                 "daily": {
                     "close": close,
-                    "change_pct": 0,
-                    "volume": 1000,
+                    "change_pct": None,
+                    "volume": None,
                 },
             })
         

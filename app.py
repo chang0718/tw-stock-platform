@@ -124,13 +124,44 @@ def initialize_session_state():
 # 資料載入
 # ============================================================
 
+def _update_price_history(df: pd.DataFrame):
+    """將今日收盤價累積到本機 price_history.json（動能/波動率基礎）"""
+    from config import HISTORY_FILE
+    from utils import read_json, write_json
+    today = date.today().isoformat()
+    history = read_json(HISTORY_FILE, {})
+    updated = 0
+    for _, row in df.iterrows():
+        t     = row.get("ticker")
+        daily = row.get("daily") if isinstance(row.get("daily"), dict) else {}
+        close = daily.get("close")
+        if t and close is not None:
+            records = history.get(t, [])
+            if not records or records[-1].get("date") != today:
+                records.append({"date": today, "close": float(close)})
+                records = records[-300:]   # 保留最近 300 個交易日
+                history[t] = records
+                updated += 1
+    if updated:
+        write_json(HISTORY_FILE, history)
+    return updated
+
+
 def load_market_data_action(include_tpex: bool = True):
     with st.spinner("📥 載入市場行情資料..."):
         loader = MarketDataLoader()
         df = loader.load_all_market_data(include_tpex=include_tpex)
+        if df.empty:
+            st.warning("⚠️ 無法取得市場行情，請確認網路連線後重試")
+            return
         st.session_state.universe_df = df
         st.session_state.last_update = datetime.now()
         st.session_state.model_cache_key = ""   # 強制重算
+
+    # 累積今日價格到本機歷史（讓動能/波動率分數逐日建立）
+    n_updated = _update_price_history(df)
+    valid_prices = df["daily"].apply(lambda d: d.get("close") if isinstance(d, dict) else None).notna().sum()
+    st.success(f"✅ 載入 {len(df)} 檔，有效收盤價 {valid_prices} 檔，累積歷史 {n_updated} 筆")
 
     with st.spinner("📊 載入三大法人 / 融資融券..."):
         inst_loader = TWSeInstitutionalLoader()
@@ -906,7 +937,7 @@ def main():
                     expanded=(idx <= 3),
                 ):
                     sc1, sc2, sc3, sc4, sc5, sc6 = st.columns(6)
-                    sc1.metric("收盤價",  f"${stock['close']:.2f}")
+                    sc1.metric("收盤價",  f"${stock['close']:.2f}" if stock.get('close') is not None else "--")
                     sc2.metric("📅 1週漲機率",  f"{stock['prob5']:.1f}%",
                                help="未來5個交易日股價上漲的可能性，>60% 看多")
                     sc3.metric("📅 1月漲機率", f"{stock['prob20']:.1f}%",
@@ -1425,7 +1456,11 @@ def main():
             prices = {}
             if not model_df.empty:
                 for _, r in model_df.iterrows():
-                    prices[r["ticker"]] = float(r["close"])
+                    if r.get("close") is not None:
+                        try:
+                            prices[r["ticker"]] = float(r["close"])
+                        except (TypeError, ValueError):
+                            pass
 
             pnl_list = port.calculate_pnl(prices)
 
@@ -1611,7 +1646,7 @@ def main():
                 wc2.metric("期望報酬", f"{wl_stock['expected_return_20d']:+.1f}%" if pd.notna(wl_stock.get("expected_return_20d")) else "N/A")
                 wc3.metric("信心度",   f"{wl_stock['confidence']:.1f}%")
                 wc4.metric("風險",     f"{wl_stock['risk_score']:.0f}")
-                wc5.metric("收盤價",   f"${wl_stock['close']:.2f}")
+                wc5.metric("收盤價",   f"${wl_stock['close']:.2f}" if wl_stock.get('close') is not None else "--")
 
                 # 基本面
                 st.markdown("##### 📊 基本面")
