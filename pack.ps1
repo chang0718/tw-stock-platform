@@ -24,10 +24,10 @@ $include = @(
     "us_market.py",
     "backtest.py",
     "data_loader.py",
-    "financials.py",
-    "news.py",
     # ── scripts ──
     "scripts\daily_report.py",
+    "scripts\init_price_history.py",
+    "scripts\run_model.py",
     # ── GitHub Actions ──
     ".github\workflows\daily_report.yml",
     # ── Streamlit 設定 ──
@@ -38,7 +38,9 @@ $include = @(
     "CLAUDE.md",
     "DEPLOY.md",
     "SETUP_SOP.md",
+    "HANDOFF.md",
     ".gitignore",
+    "start.bat",
     # ── 個人資料（持倉/自選股/權重）──
     "tw_quant_data\portfolio.json",
     "tw_quant_data\watchlist.json",
