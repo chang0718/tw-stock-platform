@@ -20,13 +20,17 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: |
-          pip install requests yfinance pandas
+        run: pip install requests yfinance pandas numpy
 
       - name: Create data directory
         run: mkdir -p tw_quant_data
 
-      - name: Run daily report
+      - name: Run quantitative model（生成快照供 TOP5 使用）
+        run: python scripts/run_model.py
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+
+      - name: Send daily report
         env:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
