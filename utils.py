@@ -9,12 +9,17 @@ from pathlib import Path
 from functools import lru_cache
 from typing import Any, Dict
 
+import urllib3
 import pandas as pd
 import requests
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 
 from config import HTTP_CONFIG, INDUSTRY_MAPPING, TWSE_INDUSTRY_CODES
+
+# 台灣政府 API（TWSE/TPEx）SSL 憑證缺少 Subject Key Identifier，
+# Python 3.12+ 拒絕連線；使用 verify=False 並抑制警告
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 # ============================================================
@@ -26,18 +31,9 @@ def get_retry_session(
     backoff_factor: float = HTTP_CONFIG["backoff_factor"],
     status_forcelist: tuple = HTTP_CONFIG["status_forcelist"],
 ) -> requests.Session:
-    """
-    建立具有重試機制的HTTP session
-    
-    Args:
-        retries: 重試次數
-        backoff_factor: 退避係數
-        status_forcelist: 需要重試的HTTP狀態碼
-    
-    Returns:
-        配置好重試機制的Session物件
-    """
+    """建立具有重試機制的 HTTP session（停用 SSL 驗證以相容台灣政府 API）"""
     session = requests.Session()
+    session.verify = False  # TWSE/TPEx 憑證缺少 Subject Key Identifier
     retry = Retry(
         total=retries,
         read=retries,
