@@ -4,7 +4,7 @@
 """
 
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 import streamlit as st
@@ -18,6 +18,21 @@ from utils import (
     validate_ticker,
     industry_group,
 )
+
+
+def _parse_twse_date(raw: str) -> str:
+    """'113/05/12'（民國）或 '20260512'（西元）→ 'YYYY-MM-DD'；失敗回傳 ''"""
+    raw = raw.strip()
+    if "/" in raw:
+        parts = raw.split("/")
+        if len(parts) == 3:
+            try:
+                return f"{int(parts[0])+1911}-{parts[1]:0>2}-{parts[2]:0>2}"
+            except ValueError:
+                return ""
+    elif len(raw) == 8 and raw.isdigit():
+        return f"{raw[:4]}-{raw[4:6]}-{raw[6:]}"
+    return ""
 
 
 class MarketDataLoader:
@@ -180,18 +195,16 @@ class MarketDataLoader:
             st.warning(f"⚠️ 上櫃收盤價 API 失敗（{type(e).__name__}）: {e}")
             return {}
     
-    def parse_twse_daily(self, daily_rows: List[Dict]) -> Dict:
+    def parse_twse_daily(self, daily_rows: List[Dict]) -> Tuple[Dict, str]:
         """
         解析上市行情資料
-        
-        Args:
-            daily_rows: 原始行情資料
-        
+
         Returns:
-            股票代碼到行情的對照表
+            (daily_map, data_date)  data_date 為 'YYYY-MM-DD' 或空字串
         """
+        data_date = _parse_twse_date((daily_rows[0].get("Date", "") or "") if daily_rows else "")
         daily_map = {}
-        
+
         for row in daily_rows:
             # 支援多種欄位名稱
             ticker = str(
@@ -234,8 +247,8 @@ class MarketDataLoader:
                 "change_pct": change_pct,
                 "volume": int(volume),
             }
-        
-        return daily_map
+
+        return daily_map, data_date
     
     def build_company_list(
         self,
@@ -324,7 +337,7 @@ class MarketDataLoader:
         
         return pd.DataFrame(companies)
     
-    def load_all_market_data(self, include_tpex: bool = True) -> pd.DataFrame:
+    def load_all_market_data(self, include_tpex: bool = True) -> Tuple[pd.DataFrame, str]:
         """
         載入完整市場資料
         
@@ -335,15 +348,16 @@ class MarketDataLoader:
             市場資料DataFrame
         """
         companies = []
-        
+        data_date  = ""
+
         # === 載入上市資料 ===
         st.info("📥 載入上市公司資料...")
         twse_companies = self.fetch_twse_companies()
         twse_daily = self.fetch_twse_daily()
-        
+
         if twse_companies:
             # 收盤價與公司清單分開處理：即使 twse_daily 為空也能載入公司名稱
-            daily_map = self.parse_twse_daily(twse_daily) if twse_daily else {}
+            daily_map, data_date = self.parse_twse_daily(twse_daily) if twse_daily else ({}, "")
             twse_list = self.build_company_list(twse_companies, daily_map, "上市")
             companies.extend(twse_list)
             price_count = sum(1 for t in twse_list if t["daily"].get("close") is not None)
@@ -379,8 +393,8 @@ class MarketDataLoader:
         df = df.drop_duplicates(subset=['ticker'], keep='first')
         
         st.success(f"🎉 總共載入 {len(df)} 檔股票")
-        
-        return df
+
+        return df, data_date
     
     def load_from_csv(self, uploaded_file) -> Optional[pd.DataFrame]:
         """

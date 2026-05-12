@@ -63,7 +63,7 @@ def main():
 
     print("[INFO] 載入市場資料...")
     loader = MarketDataLoader()
-    df = loader.load_all_market_data()
+    df, _ = loader.load_all_market_data()
 
     if df is None or df.empty:
         print("[ERR] 市場資料載入失敗，跳過模型計算")

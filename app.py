@@ -94,6 +94,7 @@ def initialize_session_state():
         "weights":           read_json(WEIGHTS_FILE, DEFAULT_WEIGHTS),
         "notes":             read_json(NOTES_FILE, {}),
         "last_update":       None,
+        "data_date":         "",
         "snapshots":         read_json(SNAPSHOT_FILE, []),
         # 追蹤清單：{ticker: {name, added_date}}
         "watchlist":         read_json(WATCHLIST_FILE, {}),
@@ -150,18 +151,25 @@ def _update_price_history(df: pd.DataFrame):
 def load_market_data_action(include_tpex: bool = True):
     with st.spinner("📥 載入市場行情資料..."):
         loader = MarketDataLoader()
-        df = loader.load_all_market_data(include_tpex=include_tpex)
+        df, data_date = loader.load_all_market_data(include_tpex=include_tpex)
         if df.empty:
             st.error("❌ 市場資料與備用資料都無法取得，請確認網路連線後重試")
             return
         st.session_state.universe_df = df
         st.session_state.last_update = datetime.now()
+        st.session_state.data_date   = data_date
         st.session_state.model_cache_key = ""   # 強制重算
 
     # 累積今日價格到本機歷史（讓動能/波動率分數逐日建立）
     n_updated = _update_price_history(df)
     valid_prices = df["daily"].apply(lambda d: d.get("close") if isinstance(d, dict) else None).notna().sum()
     st.success(f"✅ 載入 {len(df)} 檔，有效收盤價 {valid_prices} 檔，累積歷史 {n_updated} 筆")
+    if data_date:
+        today_str = date.today().isoformat()
+        if data_date == today_str:
+            st.info(f"📅 行情資料日期：{data_date}（今日收盤）")
+        else:
+            st.warning(f"⚠️ 行情資料日期：{data_date}（前一交易日）｜TWSE 盤後資料通常於 17:00 後更新")
 
     with st.spinner("📊 載入三大法人 / 融資融券..."):
         inst_loader = TWSeInstitutionalLoader()
@@ -358,6 +366,8 @@ def render_sidebar(universe_df: pd.DataFrame) -> Dict:
     st.sidebar.markdown("### ℹ️ 關於")
     if st.session_state.last_update:
         st.sidebar.caption(f"最後更新: {st.session_state.last_update.strftime('%Y-%m-%d %H:%M')}")
+    if st.session_state.get("data_date"):
+        st.sidebar.caption(f"行情資料日：{st.session_state.data_date}")
     inst_count = len(st.session_state.institutional_data.get("inst", {}))
     wl_count   = len(st.session_state.watchlist)
     st.sidebar.caption(
@@ -1013,8 +1023,12 @@ def main():
             st.error(f"⚠️ {us_data['error']}")
             st.info("請執行：`pip install yfinance`")
         else:
-            fetched = us_data.get("fetched_at", "")
-            st.caption(f"資料時間：{fetched}（前一交易日收盤）")
+            sample_date = next(
+                (v.get("date", "") for v in us_data.get("indices", {}).values() if v.get("date")),
+                ""
+            )
+            date_label = f"資料日：{sample_date}（美東時間）" if sample_date else f"取得時間：{us_data.get('fetched_at', '')}"
+            st.caption(f"資料來源：yfinance（15分鐘延遲）｜{date_label}｜每小時快取")
 
             # ── 大盤指數 ──
             st.markdown("### 📊 美股主要指數")
