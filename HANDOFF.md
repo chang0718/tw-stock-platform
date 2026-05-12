@@ -58,51 +58,42 @@
 
 ## 三、待辦事項（新對話繼續）
 
+### ✅ 已完成（2026-05-12）
+
+- [x] **廢棄檔清理**：刪除未使用的 `financials.py`、`news.py`，更新 `pack.ps1`
+- [x] **冷啟動腳本**：新增 `scripts/init_price_history.py`（PR: feat/init-price-history）
+- [x] **雙擊啟動**：新增 `start.bat`（PR: feat/start-bat）
+- [x] **TOP5 每日報告**：新增 `scripts/run_model.py`，更新 `daily_report.yml`（PR: feat/fix-daily-report-top5）
+
 ### 🔴 高優先（影響使用體驗）
 
-1. **分數差異問題（核心問題）**
-   - 現狀：新安裝沒有 price_history.json → 動能/波動率因子全部 = 50（中性）→ 大多數股票分數雷同
-   - 已修正：每次「載入市場」後自動累積今日收盤價，20 天後動能分數開始拉開差距
-   - 追蹤清單的股票已可用 yfinance 基本面（PE、毛利率）做差異評分
-   - **待辦**：開機後載入市場，確認分數是否有差異；若仍雷同，考慮從 yfinance 批次拉前 60 天歷史給前 100 大股票
+1. **合併三個 PR 並整合測試**（見下方「五、整合測試步驟」）
 
 2. **收盤價仍可能為 N/A**
-   - 現狀：TWSE API 偶爾會回傳空行情（非交易日、剛開盤時）
-   - **待辦**：測試在交易時間載入，確認收盤價是否正確顯示
-
-3. **終端啟動體驗**
-   - 現狀：需要先 activate venv 才能直接用 `streamlit run app.py`
-   - **待辦**：考慮建立 `start.bat` 批次檔，讓使用者雙點擊就能啟動（不用開 PowerShell）
+   - TWSE API 偶爾在非交易日或剛開盤時回傳空行情
+   - **待辦**：平日盤後（14:30-15:30）載入全市場，確認收盤價正確顯示
 
 ### 🟡 中優先（功能改善）
 
-4. **FinMind Token 設定**
-   - 現狀：secrets.toml 裡 `token = "your_finmind_token_here"` 尚未填入真實 token
+3. **FinMind Token 設定**
+   - `secrets.toml` 裡 `token = "your_finmind_token_here"` 尚未填入真實 token
    - 影響：台股基本面（月營收、季報、本益比）以 yfinance 備援，部分資料可能缺失
-   - **待辦**：到 finmindtrade.com 免費註冊取得 token，填入 `.streamlit/secrets.toml` 和 Streamlit Cloud Secrets
+   - **待辦**：到 finmindtrade.com 免費註冊取得 token，填入 `.streamlit/secrets.toml` 和 Streamlit Cloud Secrets（Secret 名稱：`FINMIND_TOKEN`）
 
-5. **資料錯誤診斷**
-   - 使用者反映「進去都是錯誤的數字跟資訊」
-   - 已修正假資料問題，但需要在交易時間實際測試確認
-   - **待辦**：平日盤後（14:30-15:30）載入全市場，截圖確認數字是否合理
+4. **GitHub Actions 需新增 FINMIND_TOKEN Secret（選用）**
+   - `daily_report.yml` 已加入 `FINMIND_TOKEN` 環境變數
+   - 若不設定則 Actions 改用 yfinance 備援，功能仍可運作
 
-6. **price_history.json 冷啟動問題（已確認要做）**
-   - 現狀：第一次使用時無歷史資料，技術分數全為 50，分數幾乎無差異
-   - **待辦**：新增 `scripts/init_price_history.py`，一次性從 yfinance 批次下載前 100 大台股的 60 天歷史收盤價，寫入 `tw_quant_data/price_history.json`
-   - 執行後動能 / 波動率因子立即有真實資料，分數差距可明顯拉開
-   - 腳本加間隔（每筆 0.5 秒）避免 yfinance rate limit
-
-7. **TOP5 在每日報告中無資料**
-   - 現狀：daily_report.py 讀取 `tw_quant_data/snapshots.json`，但 Streamlit Cloud 的儲存在重啟後消失
-   - **待辦**：在平台點「保存快照」後，GitHub Actions 才能抓到 TOP5；或改為讓 Actions 自己跑模型（需要更多依賴）
+5. **資料準確度確認**
+   - **待辦**：平日盤後實際測試，確認模型 TOP5、收盤價、基本面數字是否合理
 
 ### 🟢 低優先（長期改善）
 
-8. **模型水泥股問題**：TOP5 仍可能被無基本面的小股票佔據，需進一步調整評分權重
+6. **模型水泥股問題**：TOP5 仍可能被無基本面小股票佔據，需調整評分權重
 
-9. **Streamlit Cloud 資料持久化**：自選股、持倉、快照在雲端重啟後消失，需要外部儲存（Google Sheets、Supabase 等）
+7. **Streamlit Cloud 資料持久化**：自選股、持倉在雲端重啟後消失，需外部儲存（Google Sheets、Supabase 等）
 
-10. **美股資料錯誤**：yfinance 延遲 15 分鐘，部分美股指數資料顯示有問題，需排查
+8. **美股資料錯誤**：yfinance 延遲 15 分鐘，部分美股指數資料有問題，需排查
 
 ---
 
@@ -120,13 +111,51 @@
 | `config.py` | 全域設定（因子權重、顯示欄位） |
 | `tw_quant_data/` | 個人資料（持倉、自選股、快照、歷史價格） |
 | `.streamlit/secrets.toml` | 本機敏感設定（密碼、token）— 不上傳 GitHub |
-| `run.ps1` | 終端啟動腳本 |
+| `run.ps1` | PowerShell 啟動腳本 |
+| `start.bat` | 雙擊啟動腳本（不需開 PowerShell）|
+| `scripts/init_price_history.py` | 冷啟動：批次下載前100大台股60天歷史 |
+| `scripts/run_model.py` | GitHub Actions 用：執行模型生成快照 |
+| `scripts/daily_report.py` | 每日報告寄信 |
 | `SETUP_SOP.md` | 環境建置 SOP |
 | `USER_SOP.md` | 使用說明與換機 SOP |
 
 ---
 
-## 五、給新對話 Claude 的指令範本
+## 五、整合測試步驟
+
+### 步驟 1 — 合併三個 PR（GitHub 上操作）
+依序合併以下 PR（在 GitHub 上 Merge Pull Request）：
+1. `feat/init-price-history` → 建立 PR: https://github.com/chang0718/tw-stock-platform/pull/new/feat/init-price-history
+2. `feat/start-bat` → 建立 PR: https://github.com/chang0718/tw-stock-platform/pull/new/feat/start-bat
+3. `feat/fix-daily-report-top5` → 建立 PR: https://github.com/chang0718/tw-stock-platform/pull/new/feat/fix-daily-report-top5
+
+合併後執行 `git pull origin main` 拉到本機。
+
+### 步驟 2 — 冷啟動歷史資料（本機執行一次）
+```powershell
+# 在專案目錄執行（約 3~5 分鐘）
+.\run.ps1  # 先確認能正常啟動，再關閉
+python scripts/init_price_history.py
+```
+完成後確認 `tw_quant_data/price_history.json` 存在且有資料。
+
+### 步驟 3 — 確認模型分數差異
+1. 執行 `.\run.ps1` 或雙擊 `start.bat` 啟動平台
+2. 點「🌐 載入全市場」
+3. 查看「量化候選清單」頁面 — 各股分數應有明顯差異（不再全是 50）
+
+### 步驟 4 — 測試 start.bat
+在 Windows 檔案總管中雙擊 `start.bat`，確認平台能自動啟動。
+
+### 步驟 5 — 測試 Actions 自動報告（手動觸發）
+1. 前往 GitHub → Actions → 「每日盤後分析報告」
+2. 點「Run workflow」手動觸發
+3. 觀察 logs：應能看到「Run quantitative model」步驟成功
+4. 確認 Gmail 收到報告且 TOP5 有實際股票名稱（不再顯示「無快照資料」）
+
+---
+
+## 六、給新對話 Claude 的指令範本
 
 ```
 請閱讀 HANDOFF.md 了解專案現況。
@@ -135,16 +164,36 @@
 
 ---
 
-## 六、GitHub Secrets（Actions 寄信用）
+## 七、GitHub Secrets（Actions 用）
 
 | Secret 名稱 | 用途 |
 |-------------|------|
 | `GMAIL_USER` | scps960810@gmail.com |
-| `GMAIL_APP_PASSWORD` | Gmail App 密碼（已設定，勿外洩） |
+| `GMAIL_APP_PASSWORD` | Gmail App 密碼（已設定，勿外洩）|
+| `FINMIND_TOKEN` | FinMind API token（選用，未設定則用 yfinance 備援）|
 
-## 七、注意事項
+## 八、虛擬環境說明
+
+**為什麼一定要在虛擬環境（.venv）裡執行？**
+
+Python 套件安裝在「全域」或「虛擬環境」是兩件事：
+
+| | 全域 Python | 虛擬環境 .venv |
+|--|--|--|
+| 套件安裝位置 | 整台電腦共用 | 只在這個專案 |
+| 版本衝突風險 | 高（A 專案要 pandas 2.0，B 專案要 pandas 1.5 → 衝突）| 無（各自隔離）|
+| 刪除影響 | 影響所有專案 | 只影響此專案 |
+
+本專案的 `streamlit`、`pandas 3.x`、`yfinance` 等套件都裝在 `.venv` 裡，
+全域 Python 裡沒有，所以直接執行 `python` 或 `streamlit` 會找不到套件。
+
+**解法（三擇一）：**
+1. 雙擊 `start.bat`（最簡單，自動 activate）
+2. 執行 `.\run.ps1`（PowerShell 版）
+3. 手動啟動：`.\.venv\Scripts\Activate.ps1` 再 `streamlit run app.py`
+
+## 九、注意事項
 
 - `secrets.toml` 已在 `.gitignore`，不會上傳 GitHub
 - 每次修改 code 後需 `git add . && git commit && git push`，Streamlit Cloud 才會自動更新
-- 虛擬環境在 `.venv/`，每次開新 PowerShell 需先執行 `.\.venv\Scripts\Activate.ps1`
-- `run.ps1` 會自動 activate 虛擬環境再啟動
+- `tw_quant_data/` 也在 `.gitignore`，price_history.json 只存在本機，需用 `init_price_history.py` 重建
