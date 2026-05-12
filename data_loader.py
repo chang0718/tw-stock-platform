@@ -75,17 +75,20 @@ class MarketDataLoader:
                 timeout=HTTP_CONFIG["timeout"]
             )
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+            if not data:
+                st.warning("⚠️ 上市公司清單 API 回傳空資料")
+            return data
         except Exception as e:
-            st.warning(f"⚠️ 無法載入上市公司清單: {e}")
+            st.warning(f"⚠️ 上市公司清單 API 失敗（{type(e).__name__}）: {e}")
             return []
-    
+
     def fetch_twse_daily(self) -> List[Dict]:
         """
         載入上市盤後行情
-        
+
         Returns:
-            行情列表
+            行情列表（市場未收盤或非交易日時可能為空，不影響公司清單載入）
         """
         try:
             response = self.session.get(
@@ -93,9 +96,12 @@ class MarketDataLoader:
                 timeout=HTTP_CONFIG["timeout"]
             )
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+            if not data:
+                st.info("ℹ️ 今日收盤價尚未公布（市場未收盤或非交易日），股價將顯示 --")
+            return data
         except Exception as e:
-            st.warning(f"⚠️ 無法載入上市盤後行情: {e}")
+            st.warning(f"⚠️ 上市收盤價 API 失敗（{type(e).__name__}）: {e}")
             return []
     
     def fetch_tpex_companies(self) -> List[Dict]:
@@ -171,7 +177,7 @@ class MarketDataLoader:
             
             return daily_map
         except Exception as e:
-            st.warning(f"⚠️ 無法載入上櫃盤後行情: {e}")
+            st.warning(f"⚠️ 上櫃收盤價 API 失敗（{type(e).__name__}）: {e}")
             return {}
     
     def parse_twse_daily(self, daily_rows: List[Dict]) -> Dict:
@@ -335,17 +341,15 @@ class MarketDataLoader:
         twse_companies = self.fetch_twse_companies()
         twse_daily = self.fetch_twse_daily()
         
-        if twse_companies and twse_daily:
-            daily_map = self.parse_twse_daily(twse_daily)
-            twse_list = self.build_company_list(
-                twse_companies,
-                daily_map,
-                "上市"
-            )
+        if twse_companies:
+            # 收盤價與公司清單分開處理：即使 twse_daily 為空也能載入公司名稱
+            daily_map = self.parse_twse_daily(twse_daily) if twse_daily else {}
+            twse_list = self.build_company_list(twse_companies, daily_map, "上市")
             companies.extend(twse_list)
-            st.success(f"✅ 已載入 {len(twse_list)} 檔上市股票")
+            price_count = sum(1 for t in twse_list if t["daily"].get("close") is not None)
+            st.success(f"✅ 已載入 {len(twse_list)} 檔上市股票（有收盤價：{price_count} 檔）")
         else:
-            st.warning("⚠️ 上市資料載入失敗")
+            st.warning("⚠️ 上市公司清單載入失敗，請確認網路連線")
         
         # === 載入上櫃資料 ===
         if include_tpex:

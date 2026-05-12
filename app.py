@@ -152,7 +152,7 @@ def load_market_data_action(include_tpex: bool = True):
         loader = MarketDataLoader()
         df = loader.load_all_market_data(include_tpex=include_tpex)
         if df.empty:
-            st.warning("⚠️ 無法取得市場行情，請確認網路連線後重試")
+            st.error("❌ 市場資料與備用資料都無法取得，請確認網路連線後重試")
             return
         st.session_state.universe_df = df
         st.session_state.last_update = datetime.now()
