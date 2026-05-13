@@ -120,6 +120,15 @@ def initialize_session_state():
         if k not in st.session_state:
             st.session_state[k] = v
 
+    # 若 secrets.toml 已填入真實 FinMind token，自動載入（避免每次重啟都要手動輸入）
+    if not st.session_state.get("finmind_token"):
+        try:
+            secret_token = st.secrets.get("finmind", {}).get("token", "")
+            if secret_token and secret_token != "your_finmind_token_here":
+                st.session_state.finmind_token = secret_token
+        except Exception:
+            pass
+
 
 # ============================================================
 # 資料載入
@@ -562,7 +571,11 @@ def render_flow_block(stock: dict, show_reload: bool = False):
     src = stock.get("flow_data_source", "⚠️ 暫無數據")
     has_data = stock.get("foreign_net") is not None or stock.get("margin_balance") is not None
     if not has_data:
-        st.warning("⚠️ 籌碼數據未載入。請點擊側邊欄「🔄 載入上市」或「🌐 載入全市場」以取得三大法人資料。")
+        inst_loaded = bool(st.session_state.get("institutional_data", {}).get("inst"))
+        if inst_loaded:
+            st.info("ℹ️ 本股今日無三大法人買賣記錄（TWSE T86 API 只回傳當日有交易的標的）")
+        else:
+            st.warning("⚠️ 籌碼數據未載入。請點擊側邊欄「🔄 載入上市」或「🌐 載入全市場」以取得三大法人資料。")
         if show_reload:
             if st.button("🔄 重新載入三大法人資料", key="reload_inst"):
                 with st.spinner("載入中..."):
@@ -1352,6 +1365,31 @@ def main():
                         st.plotly_chart(fig_fin, use_container_width=True)
                     else:
                         st.info("⚠️ 無季報資料")
+
+                # ── 基本面摘要 ──
+                summary_parts = []
+                if rev_trend:
+                    last_rev = rev_trend[-1]
+                    yoy = last_rev.get("yoy_pct")
+                    mom = last_rev.get("mom_pct")
+                    yoy_txt = f"年增 **{yoy:+.1f}%**" if yoy is not None else "年增資料不足"
+                    mom_txt = f"，月增 {mom:+.1f}%" if mom is not None else ""
+                    summary_parts.append(
+                        f"- 月營收（{last_rev.get('month','--')}）：{yoy_txt}{mom_txt}"
+                    )
+                if fin_trend:
+                    eps_vals = [q["eps"] for q in fin_trend if q.get("eps") is not None]
+                    gm_vals  = [q["gross_margin"] for q in fin_trend if q.get("gross_margin") is not None]
+                    if eps_vals:
+                        eps_dir = ("↑ 成長" if eps_vals[-1] > eps_vals[0] else "↓ 下滑") if len(eps_vals) >= 2 else ""
+                        summary_parts.append(f"- 最近季 EPS：**{eps_vals[-1]:.2f} 元** {eps_dir}".strip())
+                    if gm_vals:
+                        gm_dir = ("擴張" if gm_vals[-1] > gm_vals[0] else "收縮") if len(gm_vals) >= 2 else ""
+                        summary_parts.append(f"- 毛利率：**{gm_vals[-1]:.1f}%**（近期{gm_dir}）" if gm_dir else f"- 毛利率：**{gm_vals[-1]:.1f}%**")
+                if summary_parts:
+                    st.markdown("**📋 基本面摘要**")
+                    st.markdown("\n".join(summary_parts))
+                    st.caption("⚠️ 以上為歷史財務數據，僅供研究參考，不構成投資建議。")
 
             # ── 籌碼 ──
             st.markdown("---")
