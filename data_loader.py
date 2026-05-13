@@ -385,7 +385,7 @@ class MarketDataLoader:
         # === 檢查結果 ===
         if not companies:
             st.error("❌ 所有資料來源都失敗,使用備用資料")
-            return self.load_fallback_data()
+            return self.load_fallback_data(), ""
         
         df = pd.DataFrame(companies)
         
