@@ -15,8 +15,11 @@ import sys
 import time
 from pathlib import Path
 
+import urllib3
 import requests
 import yfinance as yf
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import DATA_DIR
@@ -45,7 +48,7 @@ def fetch_twse_top_n(n: int) -> list:
     """從 TWSE 盤後行情 API 取前 N 大成交量股票代碼"""
     url = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
     try:
-        r = requests.get(url, timeout=20)
+        r = requests.get(url, timeout=20, verify=False)
         r.raise_for_status()
         data = r.json()
         candidates = []
