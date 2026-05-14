@@ -6,10 +6,11 @@ TWSE 三大法人 + 融資融券資料載入器
 
 import json
 import time
-import requests
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Optional
+
+from utils import get_retry_session
 
 _CACHE_FILE = Path("tw_quant_data/institutional_cache.json")
 _TTL = 24 * 3600  # 1天
@@ -18,7 +19,7 @@ _TTL = 24 * 3600  # 1天
 class TWSeInstitutionalLoader:
 
     def __init__(self):
-        self.session = requests.Session()
+        self.session = get_retry_session()
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         })
