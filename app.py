@@ -26,6 +26,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from config import (
+    CONCEPT_STOCKS,
     DEFAULT_WEIGHTS,
     DISPLAY_COLUMNS,
     NOTES_FILE,
@@ -849,6 +850,13 @@ def main():
                 for t, d in st.session_state.watchlist_data.items()
                 if "fundamental" in d
             })
+            # 從追蹤清單取得新聞情緒 score（-1.0 ~ 1.0）
+            sentiment_data = {
+                t: d["news"]["sentiment"]["score"]
+                for t, d in st.session_state.watchlist_data.items()
+                if "news" in d and isinstance(d["news"].get("sentiment"), dict)
+                   and d["news"]["sentiment"].get("score") is not None
+            }
             inst = st.session_state.institutional_data
             model = QuantModel(st.session_state.weights)
             model_df = model.enrich_dataframe(
@@ -857,6 +865,7 @@ def main():
                 inst_data        = inst.get("inst", {}),
                 margin_data      = inst.get("margin", {}),
                 fundamental_data = fund_data,
+                sentiment_data   = sentiment_data,
             )
 
             # 加入回測命中率
@@ -872,10 +881,13 @@ def main():
                 model_df["hit_rate_source"]   = "示範估算"
                 model_df["local_sample_size"] = 0
 
-            # 重算 final_composite（含真實 hit_rate + 板塊偏好 + 數據完整度）
+            # 重算 final_composite（含真實 hit_rate + 板塊偏好 + 數據完整度 + 新聞情緒）
             pg = filters["preferred_groups"]
-            group_boost_series       = model_df["group"].apply(lambda g: 4.0 if g in pg else 0.0)
+            group_boost_series        = model_df["group"].apply(lambda g: 4.0 if g in pg else 0.0)
             completeness_bonus_series = model_df["complete_score"].apply(lambda c: 3.0 if c else 0.0)
+            news_adj_series           = model_df["ticker"].apply(
+                lambda t: float(max(-5.0, min(5.0, sentiment_data.get(t, 0) * 5)))
+            )
             model_df["final_composite"] = (
                 model_df["prob20"]        * 0.35
                 + model_df["confidence"]  * 0.2
@@ -884,6 +896,7 @@ def main():
                 + model_df["composite_score"] * 0.1
                 + group_boost_series
                 + completeness_bonus_series
+                + news_adj_series
             ).round(2)
 
             st.session_state.model_df_cached = model_df
@@ -1733,38 +1746,206 @@ def main():
 
     # ========== Tab 6: 產業總覽 ==========
     with tabs[6]:
-        st.subheader("產業總覽")
+        st.subheader("📊 產業 / 概念股瀏覽器")
         if model_df.empty:
-            st.warning("⚠️ 沒有資料")
+            st.warning("⚠️ 請先載入市場資料")
         else:
-            ind_sum = model_df.groupby("group", dropna=False).agg(
-                股票數=("ticker", "count"),
-                平均20日機率=("prob20", "mean"),
-                平均期望報酬=("expected_return_20d", "mean"),
-                平均信心度=("confidence", "mean"),
-                平均命中率=("hit_rate", "mean"),
-                平均風險=("risk_score", "mean"),
-                核心候選=("candidate_level", lambda x: (x == "核心候選").sum()),
-            ).reset_index().round({
-                "平均20日機率": 1, "平均期望報酬": 2, "平均信心度": 1,
-                "平均命中率": 1, "平均風險": 1,
-            }).rename(columns={"group": "產業"}).sort_values("平均20日機率", ascending=False)
+            ind_tab, concept_tab, chart_tab = st.tabs(["🏭 產業分類", "💡 概念股", "📈 產業統計圖"])
 
-            st.dataframe(ind_sum, use_container_width=True, height=400)
+            # ── 共用輔助：mini-dashboard expander ─────────────────────
+            def _render_mini_dashboard(stock_row: pd.Series):
+                ticker = stock_row.get("ticker", "")
+                name   = stock_row.get("name", "")
+                close  = stock_row.get("close")
+                chg    = stock_row.get("change_pct")
+                vol    = stock_row.get("volume")
+                prob20 = stock_row.get("prob20", 50)
+                prob60 = stock_row.get("prob60", 50)
+                risk   = stock_row.get("risk_score", 50)
+                lv     = stock_row.get("candidate_level", "保守觀望")
+                er     = stock_row.get("expected_return_20d")
 
-            st.markdown("### 產業期望報酬 vs 風險")
-            fig = px.scatter(
-                ind_sum, x="平均期望報酬", y="平均風險",
-                size="股票數", color="核心候選",
-                hover_data=["產業", "平均信心度", "平均命中率"],
-                text="產業", title="產業期望報酬風險分析",
-                labels={"平均期望報酬": "20日期望報酬(%)", "平均風險": "風險分數"},
-                color_continuous_scale="Viridis",
-            )
-            fig.update_traces(textposition="top center")
-            fig.add_hline(y=50, line_dash="dash", line_color="gray", opacity=0.5)
-            fig.add_vline(x=0, line_dash="dash", line_color="green", opacity=0.5)
-            st.plotly_chart(fig, use_container_width=True)
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("收盤", f"{close:.1f}" if close else "--",
+                          delta=f"{chg:+.2f}%" if chg is not None else None)
+                c2.metric("20日機率", f"{prob20:.0f}%")
+                c3.metric("60日機率", f"{prob60:.0f}%")
+                c4.metric("風險分", f"{risk:.0f}")
+
+                sc1, sc2 = st.columns([1, 1])
+                with sc1:
+                    # 六大因子雷達圖
+                    factors = ["動能", "成長", "品質", "價值", "籌碼", "低波動"]
+                    vals = [
+                        stock_row.get("momentum_score", 50),
+                        stock_row.get("growth_score",   50),
+                        stock_row.get("quality_score",  50),
+                        stock_row.get("value_score",    50),
+                        stock_row.get("flow_score",     50),
+                        stock_row.get("low_vol_score",  50),
+                    ]
+                    fig_r = go.Figure(go.Scatterpolar(
+                        r=vals + [vals[0]], theta=factors + [factors[0]],
+                        fill="toself", fillcolor="rgba(99,110,250,0.2)",
+                        line=dict(color="rgb(99,110,250)"),
+                    ))
+                    fig_r.update_layout(
+                        polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+                        showlegend=False, height=250,
+                        margin=dict(l=30, r=30, t=20, b=20),
+                    )
+                    st.plotly_chart(fig_r, use_container_width=True)
+                with sc2:
+                    st.markdown(f"**候選等級**：{lv}")
+                    if er is not None:
+                        st.markdown(f"**20日期望報酬**：{er:+.2f}%")
+                    vol_str = f"{int(vol/1000)}千股" if vol else "--"
+                    st.markdown(f"**成交量**：{vol_str}")
+                    market = stock_row.get("market", "")
+                    st.markdown(f"**市場**：{market}")
+                    st.markdown(f"**產業**：{stock_row.get('industry', '--')}")
+                    if st.button("🔍 完整個股分析", key=f"goto_{ticker}"):
+                        st.session_state["goto_ticker"] = ticker
+                        st.info(f"請切換到「🔍 個股分析」Tab，已預選 {ticker} {name}")
+
+            # ── 共用：顯示股票列表 + 點選展開 mini-dashboard ──────────
+            def _render_stock_list(sub_df: pd.DataFrame, list_key: str):
+                if sub_df.empty:
+                    st.info("此分類目前無資料（載入市場資料後會更新）")
+                    return
+
+                # 整理顯示欄位
+                disp = sub_df[["ticker", "name", "market"]].copy()
+                disp["收盤"]    = sub_df["close"].apply(lambda x: f"{x:.1f}" if pd.notna(x) and x else "--")
+                disp["漲跌%"]   = sub_df["change_pct"].apply(
+                    lambda x: f"{x:+.2f}%" if pd.notna(x) and x is not None else "--"
+                )
+                disp["成交量(萬)"] = sub_df["volume"].apply(
+                    lambda x: f"{int(x/10000)}" if pd.notna(x) and x else "--"
+                )
+                disp["20日機率"] = sub_df["prob20"].apply(lambda x: f"{x:.0f}%")
+                disp["候選等級"] = sub_df["candidate_level"]
+                disp["風險"]    = sub_df["risk_score"].apply(lambda x: f"{x:.0f}")
+                disp = disp.rename(columns={"ticker": "代號", "name": "名稱", "market": "市場"})
+
+                st.dataframe(disp.reset_index(drop=True), use_container_width=True, height=350)
+                st.caption(f"共 {len(sub_df)} 支股票｜點選代號可展開詳細資訊")
+
+                # 選股展開 mini-dashboard
+                selected_t = st.selectbox(
+                    "展開個股詳細資訊",
+                    ["（請選擇）"] + sub_df["ticker"].tolist(),
+                    format_func=lambda t: t if t == "（請選擇）" else
+                        f"{t}　{sub_df.loc[sub_df['ticker']==t, 'name'].iloc[0] if not sub_df.loc[sub_df['ticker']==t].empty else ''}",
+                    key=f"sel_{list_key}",
+                )
+                if selected_t != "（請選擇）":
+                    row = sub_df[sub_df["ticker"] == selected_t].iloc[0]
+                    with st.expander(f"📊 {selected_t} {row.get('name','')} — 快速儀表板", expanded=True):
+                        _render_mini_dashboard(row)
+
+            # ── Tab A：產業分類 ──────────────────────────────────────
+            with ind_tab:
+                # 產業統計摘要卡片
+                ind_sum = model_df.groupby("group", dropna=False).agg(
+                    股票數=("ticker", "count"),
+                    平均20日機率=("prob20", "mean"),
+                    平均漲跌=("change_pct", "mean"),
+                    核心候選數=("candidate_level", lambda x: (x == "核心候選").sum()),
+                ).reset_index().rename(columns={"group": "產業"}).sort_values("平均20日機率", ascending=False)
+
+                # 產業卡片牆（每行 4 格）
+                groups = ind_sum["產業"].tolist()
+                if "selected_industry" not in st.session_state:
+                    st.session_state["selected_industry"] = groups[0] if groups else ""
+
+                st.markdown("#### 選擇產業")
+                cols_per_row = 4
+                for i in range(0, len(groups), cols_per_row):
+                    row_cols = st.columns(cols_per_row)
+                    for j, grp in enumerate(groups[i:i+cols_per_row]):
+                        row_data = ind_sum[ind_sum["產業"] == grp].iloc[0]
+                        prob_avg = row_data["平均20日機率"]
+                        cnt      = int(row_data["股票數"])
+                        core     = int(row_data["核心候選數"])
+                        chg_avg  = row_data["平均漲跌"]
+                        chg_str  = f"{chg_avg:+.2f}%" if pd.notna(chg_avg) else "--"
+                        label    = f"**{grp}**\n{cnt}支｜{prob_avg:.0f}%機率｜{chg_str}"
+                        active   = (st.session_state["selected_industry"] == grp)
+                        btn_type = "primary" if active else "secondary"
+                        if row_cols[j].button(label, key=f"ind_{grp}", type=btn_type, use_container_width=True):
+                            st.session_state["selected_industry"] = grp
+                            st.rerun()
+
+                # 顯示所選產業的股票列表
+                sel_ind = st.session_state.get("selected_industry", "")
+                if sel_ind:
+                    st.markdown(f"---\n#### 🏭 {sel_ind}（{(model_df['group']==sel_ind).sum()} 支）")
+                    ind_stocks = model_df[model_df["group"] == sel_ind].sort_values("prob20", ascending=False)
+                    _render_stock_list(ind_stocks, f"ind_{sel_ind}")
+
+            # ── Tab B：概念股 ────────────────────────────────────────
+            with concept_tab:
+                if "selected_concept" not in st.session_state:
+                    st.session_state["selected_concept"] = list(CONCEPT_STOCKS.keys())[0]
+
+                st.markdown("#### 選擇概念")
+                concepts = list(CONCEPT_STOCKS.keys())
+                cols_per_row = 3
+                for i in range(0, len(concepts), cols_per_row):
+                    row_cols = st.columns(cols_per_row)
+                    for j, concept in enumerate(concepts[i:i+cols_per_row]):
+                        tickers_in = CONCEPT_STOCKS[concept]
+                        sub = model_df[model_df["ticker"].isin(tickers_in)]
+                        cnt = len(sub)
+                        prob_avg = sub["prob20"].mean() if cnt else 0
+                        active   = (st.session_state["selected_concept"] == concept)
+                        btn_type = "primary" if active else "secondary"
+                        label    = f"**{concept}**\n{cnt}支｜{prob_avg:.0f}%機率"
+                        if row_cols[j].button(label, key=f"concept_{concept}", type=btn_type, use_container_width=True):
+                            st.session_state["selected_concept"] = concept
+                            st.rerun()
+
+                sel_concept = st.session_state.get("selected_concept", "")
+                if sel_concept and sel_concept in CONCEPT_STOCKS:
+                    tickers_in = CONCEPT_STOCKS[sel_concept]
+                    concept_stocks_df = model_df[model_df["ticker"].isin(tickers_in)].sort_values("prob20", ascending=False)
+                    st.markdown(f"---\n#### 💡 {sel_concept}（{len(concept_stocks_df)} 支）")
+                    # 顯示不在市場資料中的股票（未上市或代碼不符）
+                    missing = [t for t in tickers_in if t not in model_df["ticker"].values]
+                    if missing:
+                        st.caption(f"以下代碼尚未載入：{', '.join(missing)}")
+                    _render_stock_list(concept_stocks_df, f"concept_{sel_concept}")
+
+            # ── Tab C：產業統計圖（保留原有功能）───────────────────────
+            with chart_tab:
+                ind_full = model_df.groupby("group", dropna=False).agg(
+                    股票數=("ticker", "count"),
+                    平均20日機率=("prob20", "mean"),
+                    平均期望報酬=("expected_return_20d", "mean"),
+                    平均信心度=("confidence", "mean"),
+                    平均命中率=("hit_rate", "mean"),
+                    平均風險=("risk_score", "mean"),
+                    核心候選=("candidate_level", lambda x: (x == "核心候選").sum()),
+                ).reset_index().round({
+                    "平均20日機率": 1, "平均期望報酬": 2, "平均信心度": 1,
+                    "平均命中率": 1, "平均風險": 1,
+                }).rename(columns={"group": "產業"}).sort_values("平均20日機率", ascending=False)
+
+                st.dataframe(ind_full, use_container_width=True, height=380)
+                st.markdown("### 產業期望報酬 vs 風險")
+                fig = px.scatter(
+                    ind_full, x="平均期望報酬", y="平均風險",
+                    size="股票數", color="核心候選",
+                    hover_data=["產業", "平均信心度", "平均命中率"],
+                    text="產業", title="產業期望報酬風險分析",
+                    labels={"平均期望報酬": "20日期望報酬(%)", "平均風險": "風險分數"},
+                    color_continuous_scale="Viridis",
+                )
+                fig.update_traces(textposition="top center")
+                fig.add_hline(y=50, line_dash="dash", line_color="gray", opacity=0.5)
+                fig.add_vline(x=0, line_dash="dash", line_color="green", opacity=0.5)
+                st.plotly_chart(fig, use_container_width=True)
 
     # ========== Tab 7: 模型設定 ==========
     with tabs[7]:

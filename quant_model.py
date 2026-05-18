@@ -264,14 +264,25 @@ class QuantModel:
         growth_raw = pd.concat(g_components, axis=1).mean(axis=1)
         r["growth_score"] = growth_raw.where(has_fund, 50.0)
 
-        # ── Momentum: MA20(60%) + MA60(40%)，Jegadeesh-Titman 加權 ──
+        # ── Momentum: MA20(60%) + MA60(40%)，無歷史時以今日漲跌%代理 ──
+        # change_pct 全市場皆有，無快照時用它做跨截面排名，避免全部 50
         m20_s = self._col_cs(df, "m20", True)
         m60_s = self._col_cs(df, "m60", True)
-        momentum_raw = m20_s * 0.6 + m60_s * 0.4
+        cp_s  = self._col_cs(df, "change_pct", True)
+        has_m20 = pd.to_numeric(df.get("m20", pd.Series(dtype=float)), errors="coerce").notna()
+        momentum_raw = (
+            m20_s.where(has_m20, cp_s) * 0.6 +
+            m60_s.where(has_m20, cp_s) * 0.4
+        )
         r["momentum_score"] = self._cross_sectional_score(momentum_raw, higher_is_better=True)
 
-        # ── Flow: 外資淨買（千股）──
-        r["flow_score"] = self._col_cs(df, "foreign_net", up=True)
+        # ── Flow: 外資淨買（千股）；無外資資料時以成交量跨截面排名代理 ──
+        # volume 反映市場關注度，無法人資料時給 25-75 範圍（不給滿分 50 避免與有資料混淆）
+        has_fn = pd.to_numeric(df.get("foreign_net", pd.Series(dtype=float)), errors="coerce").notna()
+        flow_cs  = self._col_cs(df, "foreign_net", up=True)
+        vol_cs   = self._col_cs(df, "volume", up=True)
+        vol_proxy = (vol_cs * 0.5 + 25).clip(25, 75)  # 壓縮到 25-75，保留外資評分的空間
+        r["flow_score"] = flow_cs.where(has_fn, vol_proxy)
 
         # ── Low Vol: 波動率越低越好（低波動異象）──
         r["low_vol_score"] = self._col_cs(df, "volatility", up=False)
@@ -432,6 +443,7 @@ class QuantModel:
         self, df: pd.DataFrame, preferred_groups: List[str],
         inst_data: Dict = None, margin_data: Dict = None,
         fundamental_data: Dict = None,
+        sentiment_data: Dict = None,
     ) -> pd.DataFrame:
         if df.empty:
             return pd.DataFrame()
@@ -439,6 +451,7 @@ class QuantModel:
         inst_data        = inst_data        or {}
         margin_data      = margin_data      or {}
         fundamental_data = fundamental_data or {}
+        sentiment_data   = sentiment_data   or {}
 
         # Pass 1：收集各股原始指標
         rows = []
@@ -517,5 +530,17 @@ class QuantModel:
         completeness_bonus = result["complete_score"].apply(
             lambda c: 3.0 if c else 0.0
         )
-        result["final_composite"] = (base_fc + group_boost + completeness_bonus).round(2)
+        # 新聞情緒調整（−5 到 +5 分）：僅對有情緒數據的股票生效
+        # sentiment_score: -1.0~1.0（正面新聞佔比），無資料給 0（不影響排名）
+        def _news_adj(ticker):
+            s = sentiment_data.get(ticker)
+            if s is None:
+                return 0.0
+            return float(max(-5.0, min(5.0, s * 5)))
+
+        news_adj = result["ticker"].apply(_news_adj)
+        result["sentiment_score"] = result["ticker"].apply(
+            lambda t: sentiment_data.get(t)
+        )
+        result["final_composite"] = (base_fc + group_boost + completeness_bonus + news_adj).round(2)
         return result

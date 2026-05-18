@@ -203,8 +203,63 @@ class NewsAnalyzer:
             "data_source": "🔧 關鍵字分析（免費）",
         }
 
+    def fetch_ptt_stock(self, ticker: str, name: str) -> List[Dict]:
+        """
+        爬取 PTT Stock 版搜尋結果（不需登入），回傳文章標題清單。
+        使用關鍵字情緒分析（與 analyze_sentiment 一致）。
+        """
+        import re
+        try:
+            import requests as _req
+        except ImportError:
+            return []
+
+        key = f"ptt_{ticker}"
+        cached = self._hit(key)
+        if cached is not None:
+            return cached
+
+        results = []
+        # PTT 搜尋：股票代號為主，公司名前兩字為輔
+        short_name = re.sub(r"[\-＊*\s]", "", name)[:3]
+        for query in [ticker, short_name]:
+            try:
+                url = f"https://www.ptt.cc/bbs/Stock/search?q={query}&page=1"
+                r = _req.get(
+                    url,
+                    headers={
+                        "Cookie": "over18=1",
+                        "User-Agent": "Mozilla/5.0 (compatible; tw-stock-bot/1.0)",
+                    },
+                    timeout=8,
+                    verify=False,
+                )
+                if r.status_code != 200:
+                    continue
+                # 從 HTML 中擷取文章標題（不用 BeautifulSoup 降低依賴）
+                titles = re.findall(
+                    r'class="title"[^>]*>\s*<a[^>]*>([^<]+)</a>', r.text
+                )
+                for t in titles[:15]:
+                    t = t.strip()
+                    if t and ticker in t or short_name in t or any(
+                        kw in t for kw in [ticker, name[:2]]
+                    ):
+                        results.append({
+                            "title":     t,
+                            "link":      url,
+                            "published": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                            "source":    "ptt_stock",
+                            "summary":   "",
+                        })
+            except Exception:
+                continue
+
+        self._put(key, results[:10])
+        return results[:10]
+
     def get_stock_news_sentiment(self, ticker: str, name: str) -> Dict:
-        """個股新聞情緒（優先用 yfinance，再用 RSS 備援）"""
+        """個股新聞情緒（yfinance 優先 → RSS 備援 → PTT Stock 板）"""
         news = []
 
         # 1. 嘗試 yfinance 新聞
@@ -238,6 +293,13 @@ class NewsAnalyzer:
                 rss_news = self.fetch_news(ticker)
             news.extend(rss_news)
 
+        # 3. PTT Stock 板補充（情緒信號）
+        try:
+            ptt_news = self.fetch_ptt_stock(ticker, name)
+            news.extend(ptt_news)
+        except Exception:
+            pass
+
         # 去重（依標題前30字元）
         seen = set()
         deduped = []
@@ -248,7 +310,7 @@ class NewsAnalyzer:
                 deduped.append(n)
 
         return {
-            "sentiment":      self.analyze_sentiment(deduped[:15]),
+            "sentiment":      self.analyze_sentiment(deduped[:20]),
             "news":           deduped[:10],
             "has_feedparser": _HAS_FEEDPARSER,
         }
