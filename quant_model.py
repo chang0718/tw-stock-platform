@@ -544,3 +544,71 @@ class QuantModel:
         )
         result["final_composite"] = (base_fc + group_boost + completeness_bonus + news_adj).round(2)
         return result
+
+    def calculate_industry_heat(
+        self,
+        model_df: pd.DataFrame,
+        supply_chains: dict,
+    ) -> pd.DataFrame:
+        """
+        計算各產業/供應鏈熱度指數（0–100）。
+        組成：籌碼 35% + 技術動能 35% + 新聞情緒 20% + 價格動能 10%
+        """
+        rows = []
+        for group_name, tickers in supply_chains.items():
+            sub = model_df[model_df["ticker"].isin(tickers)]
+            if sub.empty:
+                continue
+
+            # 籌碼分：外資+投信×2+自營，正數表示買超
+            fn = pd.to_numeric(sub.get("foreign_net", pd.Series(dtype=float)), errors="coerce")
+            tn = pd.to_numeric(sub.get("trust_net",   pd.Series(dtype=float)), errors="coerce")
+            dn = pd.to_numeric(sub.get("dealer_net",  pd.Series(dtype=float)), errors="coerce")
+            if fn.notna().any():
+                total_inst = fn.fillna(0) + tn.fillna(0) * 2 + dn.fillna(0)
+                # 每千股 500 為 ±50 分基準，clip 到 10–90
+                inst_score = float(np.clip(50 + total_inst.mean() / 500, 10, 90))
+            else:
+                inst_score = 50.0
+
+            # 技術分：momentum_score 跨截面已 0-100 標準化
+            ms = pd.to_numeric(sub.get("momentum_score", pd.Series(dtype=float)), errors="coerce")
+            tech_score = float(ms.mean()) if ms.notna().any() else 50.0
+
+            # 新聞情緒分：sentiment_score -1~1 轉 0-100
+            ss = pd.to_numeric(sub.get("sentiment_score", pd.Series(dtype=float)), errors="coerce")
+            news_score = float(np.clip(50 + ss.mean() * 50, 10, 90)) if ss.notna().any() else 50.0
+
+            # 價格動能分：今日漲跌幅，±10% 對應 0-100
+            cp = pd.to_numeric(sub.get("change_pct", pd.Series(dtype=float)), errors="coerce")
+            price_score = float(np.clip(50 + cp.mean() * 5, 10, 90)) if cp.notna().any() else 50.0
+
+            heat_index = round(
+                inst_score * 0.35 + tech_score * 0.35 + news_score * 0.20 + price_score * 0.10,
+                1,
+            )
+
+            # 代表股：漲幅前3
+            top_gainers: List[str] = []
+            if "change_pct" in sub.columns and cp.notna().any():
+                top_gainers = sub.nlargest(3, "change_pct")["ticker"].tolist()
+
+            rows.append({
+                "group":       group_name,
+                "heat_index":  heat_index,
+                "inst_score":  round(inst_score, 1),
+                "tech_score":  round(tech_score, 1),
+                "news_score":  round(news_score, 1),
+                "price_score": round(price_score, 1),
+                "stock_count": len(sub),
+                "avg_change":  round(float(cp.mean()), 2) if cp.notna().any() else 0.0,
+                "top_gainers": ", ".join(top_gainers),
+            })
+
+        if not rows:
+            return pd.DataFrame()
+        return (
+            pd.DataFrame(rows)
+            .sort_values("heat_index", ascending=False)
+            .reset_index(drop=True)
+        )

@@ -35,16 +35,31 @@ _NEG_KW = [
 
 _GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q={query}&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
 _MONEYDJ_RSS     = "https://www.moneydj.com/RSS/SubClass_Article.aspx?svc=NW&subclass=MB01"
+_YOUTUBE_RSS     = "https://www.youtube.com/feeds/videos.xml?channel_id={cid}"
 
-# 總體經濟 / 地緣政治關鍵字（英文用 en 搜尋）
+# YouTube 財經頻道（免費公開 RSS，無需 API key）
+_YOUTUBE_CHANNELS = {
+    "股癌":     "UCe17MYfNYBTvqXV48oXA-0w",
+    "CMoney":   "UCG_K9XwBOxkLBMU6VBpzUAA",
+    "雪球股神": "UCiPiS4SFDJ4xVDQb15LRCBA",
+    "財經M平方": "UC7ywxSuWlA5KqBFMhKGCNlQ",
+}
+
+# 總體經濟 / 地緣政治 / 財經媒體關鍵字
 _MACRO_QUERIES = [
-    ("川普 關稅 貿易",    "貿易/關稅"),
-    ("聯準會 Fed 利率",  "Fed/利率"),
-    ("中美 貿易戰",      "中美關係"),
-    ("台海 地緣政治",    "地緣風險"),
-    ("NVIDIA AMD 財報",  "半導體大廠"),
-    ("AI 人工智慧 投資", "AI趨勢"),
-    ("通膨 CPI 景氣",   "總經指標"),
+    ("川普 關稅 貿易",         "貿易/關稅"),
+    ("聯準會 Fed 利率",        "Fed/利率"),
+    ("中美 貿易戰",            "中美關係"),
+    ("台海 地緣政治",          "地緣風險"),
+    ("NVIDIA AMD 財報",        "半導體大廠"),
+    ("AI 人工智慧 投資",       "AI趨勢"),
+    ("通膨 CPI 景氣",          "總經指標"),
+    ("台股 外資 投信 買超",    "三大法人動向"),
+    ("台灣 法說會 財報",       "法說會"),
+    ("股癌 Gooaye 台股",       "財經媒體-股癌"),
+    ("CMoney 台股 本週",       "財經媒體-CMoney"),
+    ("財經M平方 景氣 指標",    "財經媒體-M平方"),
+    ("美股 道瓊 納指 本週",    "美股指數"),
 ]
 
 
@@ -203,6 +218,48 @@ class NewsAnalyzer:
             "data_source": "🔧 關鍵字分析（免費）",
         }
 
+    def fetch_youtube_news(self) -> List[Dict]:
+        """
+        抓取 YouTube 財經頻道最新影片標題（公開 RSS，1hr 快取）。
+        不需 API key，完全免費。
+        """
+        if not _HAS_FEEDPARSER:
+            return []
+
+        key = "youtube_finance"
+        cached = self._hit(key)
+        if cached is not None:
+            return cached
+
+        results = []
+        for ch_name, cid in _YOUTUBE_CHANNELS.items():
+            try:
+                feed = feedparser.parse(_YOUTUBE_RSS.format(cid=cid))
+                for entry in feed.entries[:5]:
+                    title = entry.get("title", "")
+                    if not title:
+                        continue
+                    try:
+                        pub = (
+                            datetime(*entry.published_parsed[:6])
+                            if hasattr(entry, "published_parsed") and entry.published_parsed
+                            else datetime.now()
+                        )
+                    except Exception:
+                        pub = datetime.now()
+                    results.append({
+                        "title":     title,
+                        "link":      entry.get("link", ""),
+                        "published": pub.strftime("%Y-%m-%d %H:%M"),
+                        "source":    f"youtube_{ch_name}",
+                        "summary":   "",
+                    })
+            except Exception:
+                continue
+
+        self._put(key, results[:20])
+        return results[:20]
+
     def fetch_ptt_stock(self, ticker: str, name: str) -> List[Dict]:
         """
         爬取 PTT Stock 版搜尋結果（不需登入），回傳文章標題清單。
@@ -300,6 +357,16 @@ class NewsAnalyzer:
         except Exception:
             pass
 
+        # 4. YouTube 財經頻道（過濾有提及個股的影片標題）
+        try:
+            yt_news = self.fetch_youtube_news()
+            keywords = [ticker, name[:2] if name else ""]
+            for item in yt_news:
+                if any(kw and kw in item["title"] for kw in keywords):
+                    news.append(item)
+        except Exception:
+            pass
+
         # 去重（依標題前30字元）
         seen = set()
         deduped = []
@@ -311,7 +378,7 @@ class NewsAnalyzer:
 
         return {
             "sentiment":      self.analyze_sentiment(deduped[:20]),
-            "news":           deduped[:10],
+            "news":           deduped[:15],
             "has_feedparser": _HAS_FEEDPARSER,
         }
 

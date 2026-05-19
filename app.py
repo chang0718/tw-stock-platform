@@ -27,6 +27,7 @@ import streamlit as st
 
 from config import (
     CONCEPT_STOCKS,
+    SUPPLY_CHAIN_GROUPS,
     DEFAULT_WEIGHTS,
     DISPLAY_COLUMNS,
     NOTES_FILE,
@@ -943,6 +944,7 @@ def main():
         "🔍 個股分析",
         "💼 持倉管理",
         "⭐ 追蹤清單",
+        "🔥 熱度排行",
         "📊 產業總覽",
         "⚙️ 模型設定",
         "📈 回測報告",
@@ -1010,6 +1012,22 @@ def main():
                     path = stock.get("scoring_path", "技術動能")
                     tags.append(f"{'📊' if path == '完整' else '📈'} 評分路徑: {path}")
                     st.caption(" | ".join(tags))
+
+                    # 信號晶片
+                    _sig_chips = []
+                    _fn = st.session_state.institutional_data.get("inst", {}).get(stock["ticker"], {}).get("foreign_net", 0) or 0
+                    _tn = st.session_state.institutional_data.get("inst", {}).get(stock["ticker"], {}).get("trust_net", 0) or 0
+                    if _fn > 0:  _sig_chips.append("🟢外資買超")
+                    elif _fn < 0: _sig_chips.append("🔴外資賣超")
+                    if _tn > 0:  _sig_chips.append("🟢投信買超")
+                    elif _tn < 0: _sig_chips.append("🔴投信賣超")
+                    _ss = stock.get("sentiment_score")
+                    if _ss is not None:
+                        if _ss > 0.2: _sig_chips.append("📰新聞正面")
+                        elif _ss < -0.2: _sig_chips.append("📰新聞負面")
+                    if stock.get("momentum_score", 50) >= 70: _sig_chips.append("⚡動能強")
+                    if _sig_chips:
+                        st.caption("信號：" + "  ".join(_sig_chips))
 
                     note = st.session_state.notes.get(stock["ticker"], "")
                     if note:
@@ -1188,7 +1206,24 @@ def main():
             cols = [c for c in DISPLAY_COLUMNS["候選清單"] if c in filtered_df.columns]
             if "expected_return_20d" not in cols:
                 cols.insert(cols.index("confidence") if "confidence" in cols else -1, "expected_return_20d")
-            display_df = filtered_df[cols].rename(columns=column_mapping)
+            display_df = filtered_df[cols].copy().rename(columns=column_mapping)
+            # 加入信號欄
+            def _sig_col(row):
+                chips = []
+                t = row.get("代碼") or row.get("ticker", "")
+                _inst = st.session_state.institutional_data.get("inst", {}).get(t, {})
+                fn = _inst.get("foreign_net", 0) or 0
+                tn = _inst.get("trust_net", 0) or 0
+                if fn > 0:  chips.append("🟢外資↑")
+                elif fn < 0: chips.append("🔴外資↓")
+                if tn > 0:  chips.append("🟢投信↑")
+                elif tn < 0: chips.append("🔴投信↓")
+                ss_v = filtered_df.loc[filtered_df["ticker"] == t, "sentiment_score"].values
+                if len(ss_v) and ss_v[0] is not None:
+                    if ss_v[0] > 0.2:  chips.append("📰+")
+                    elif ss_v[0] < -0.2: chips.append("📰-")
+                return " ".join(chips) if chips else "—"
+            display_df["信號"] = display_df.apply(_sig_col, axis=1)
             st.dataframe(display_df, use_container_width=True, height=500)
             csv_data = filtered_df[cols].to_csv(index=False).encode("utf-8-sig")
             st.download_button("📥 下載CSV", csv_data,
@@ -1480,6 +1515,64 @@ def main():
                 for c in _sig["caution"]:
                     st.warning(c)
 
+            # ── 即時信號彙整 ──
+            st.markdown("---")
+            with st.expander("📡 即時信號彙整（籌碼 / 融資券 / 新聞媒體）", expanded=False):
+                _inst_row = st.session_state.institutional_data.get("inst", {}).get(selected_ticker, {})
+                _marg_row = st.session_state.institutional_data.get("margin", {}).get(selected_ticker, {})
+                _news_d   = st.session_state.watchlist_data.get(selected_ticker, {}).get("news", {})
+
+                # 籌碼動向
+                st.markdown("**三大法人今日淨買賣（千股）**")
+                ci1, ci2, ci3 = st.columns(3)
+                fn_v = int(_inst_row.get("foreign_net", 0) or 0)
+                tn_v = int(_inst_row.get("trust_net",   0) or 0)
+                dn_v = int(_inst_row.get("dealer_net",  0) or 0)
+                ci1.metric("外資", f"{fn_v:+,}", delta_color="normal" if fn_v >= 0 else "inverse")
+                ci2.metric("投信", f"{tn_v:+,}", delta_color="normal" if tn_v >= 0 else "inverse")
+                ci3.metric("自營商", f"{dn_v:+,}", delta_color="normal" if dn_v >= 0 else "inverse")
+
+                # 融資融券
+                if _marg_row:
+                    st.markdown("**融資融券**")
+                    mr1, mr2, mr3, mr4 = st.columns(4)
+                    mr1.metric("融資餘額",   f"{int(_marg_row.get('margin_balance', 0) or 0):,}")
+                    mr2.metric("融資變化",   f"{int(_marg_row.get('margin_change',  0) or 0):+,}")
+                    mr3.metric("融券餘額",   f"{int(_marg_row.get('short_balance',  0) or 0):,}")
+                    mr4.metric("融券變化",   f"{int(_marg_row.get('short_change',   0) or 0):+,}")
+
+                # 技術信號
+                _td = st.session_state.tech_data.get(selected_ticker, {})
+                if _td:
+                    st.markdown("**技術信號**")
+                    rsi_v = _td.get("rsi")
+                    macd_v = _td.get("macd")
+                    macd_sig = _td.get("macd_signal")
+                    if rsi_v is not None:
+                        rsi_lbl = "🔥 超買(>70)" if rsi_v > 70 else ("❄️ 超賣(<30)" if rsi_v < 30 else "正常區間")
+                        st.write(f"RSI(14)：**{rsi_v:.1f}** — {rsi_lbl}")
+                    if macd_v is not None and macd_sig is not None:
+                        cross = "⬆️ 金叉（多頭）" if macd_v > macd_sig else "⬇️ 死叉（空頭）"
+                        st.write(f"MACD：{cross}")
+
+                # 最新媒體報導
+                news_list = _news_d.get("news", []) if isinstance(_news_d, dict) else []
+                if news_list:
+                    st.markdown("**最新媒體報導（前5則）**")
+                    for n in news_list[:5]:
+                        src_icon = {"yfinance": "📰", "google_news": "🗞️", "ptt_stock": "💬",
+                                    "moneydj": "💹"}.get(n.get("source", ""), "📄")
+                        src_name = n.get("source", "").replace("youtube_", "📺 ")
+                        if "youtube_" in n.get("source", ""):
+                            src_icon = "📺"
+                        st.markdown(
+                            f"{src_icon} [{n['title']}]({n.get('link','#')}) "
+                            f"<small style='color:gray'>({n.get('published','')[:10]} · {src_name})</small>",
+                            unsafe_allow_html=True,
+                        )
+                elif selected_ticker not in st.session_state.watchlist:
+                    st.info("將此股票加入追蹤清單後，系統會自動抓取新聞與情緒資料。")
+
     # ========== Tab 4: 持倉管理 ==========
     with tabs[4]:
         st.subheader("💼 我的持倉管理")
@@ -1744,8 +1837,158 @@ def main():
                     st.session_state.model_cache_key = ""
                     st.rerun()
 
-    # ========== Tab 6: 產業總覽 ==========
+    # ========== Tab 6: 熱度排行 ==========
     with tabs[6]:
+        st.subheader("🔥 產業熱度排行")
+        if model_df.empty:
+            st.warning("⚠️ 請先載入市場資料")
+        else:
+            heat_df = model.calculate_industry_heat(model_df, SUPPLY_CHAIN_GROUPS)
+            if heat_df.empty:
+                st.info("載入全市場資料後，熱度指數將自動計算。")
+            else:
+                # ── 排行榜 Bar Chart ──────────────────────────────────
+                st.markdown("#### 📊 產業熱度排行榜（籌碼 35% + 技術 35% + 新聞 20% + 漲跌 10%）")
+                top_n = min(len(heat_df), 20)
+                heat_top = heat_df.head(top_n).iloc[::-1]  # 反轉讓最熱的在頂部
+                bar_colors = [
+                    f"rgba({int(255*(1-h/100))},{int(80+h*0.5)},{int(80*(1-h/100))},0.85)"
+                    for h in heat_top["heat_index"]
+                ]
+                fig_heat = go.Figure(go.Bar(
+                    x=heat_top["heat_index"],
+                    y=heat_top["group"],
+                    orientation="h",
+                    marker_color=bar_colors,
+                    text=heat_top["heat_index"].apply(lambda v: f"{v:.0f}"),
+                    textposition="outside",
+                    hovertemplate=(
+                        "<b>%{y}</b><br>"
+                        "熱度: %{x:.1f}<br>"
+                        "<extra></extra>"
+                    ),
+                ))
+                fig_heat.update_layout(
+                    height=max(300, top_n * 28),
+                    margin=dict(l=10, r=60, t=10, b=10),
+                    xaxis=dict(range=[0, 105], title="熱度指數"),
+                    yaxis=dict(tickfont=dict(size=11)),
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                )
+                st.plotly_chart(fig_heat, use_container_width=True)
+
+                # ── 熱度分解表 ───────────────────────────────────────
+                st.markdown("#### 📋 熱度分解明細")
+                heat_display = heat_df.rename(columns={
+                    "group": "產業/概念",
+                    "heat_index": "🔥熱度",
+                    "inst_score": "籌碼",
+                    "tech_score": "技術",
+                    "news_score": "新聞",
+                    "price_score": "漲跌",
+                    "stock_count": "股票數",
+                    "avg_change": "均漲%",
+                    "top_gainers": "代表股",
+                })
+                st.dataframe(heat_display, use_container_width=True, height=400)
+
+                # ── 供應鏈個股儀表板 ─────────────────────────────────
+                st.markdown("---")
+                st.markdown("#### 🔍 供應鏈個股儀表板")
+                sel_group = st.selectbox(
+                    "選擇產業/概念",
+                    heat_df["group"].tolist(),
+                    key="heat_sel_group",
+                )
+                if sel_group:
+                    grp_tickers = SUPPLY_CHAIN_GROUPS.get(sel_group, [])
+                    grp_df = model_df[model_df["ticker"].isin(grp_tickers)].copy()
+                    if grp_df.empty:
+                        st.info("目前載入的市場資料中未包含此供應鏈的股票，請先載入全市場。")
+                    else:
+                        # 顯示欄位
+                        list_cols = ["ticker", "name", "close", "change_pct", "volume",
+                                     "foreign_net", "trust_net", "prob20", "momentum_score"]
+                        avail_cols = [c for c in list_cols if c in grp_df.columns]
+                        disp = grp_df[avail_cols].rename(columns={
+                            "ticker": "代號", "name": "名稱",
+                            "close": "收盤", "change_pct": "漲跌%",
+                            "volume": "成交量(張)", "foreign_net": "外資淨(千股)",
+                            "trust_net": "投信淨(千股)", "prob20": "20日機率%",
+                            "momentum_score": "動能分",
+                        })
+                        # 信號欄
+                        def _heat_signal(row):
+                            chips = []
+                            fn = row.get("外資淨(千股)", 0) or 0
+                            if fn > 0:  chips.append("🟢外資↑")
+                            elif fn < 0: chips.append("🔴外資↓")
+                            sc = row.get("動能分", 50) or 50
+                            if sc >= 70:   chips.append("⚡動能強")
+                            elif sc <= 30: chips.append("📉動能弱")
+                            return " ".join(chips) if chips else "—"
+                        disp["信號"] = disp.apply(_heat_signal, axis=1)
+                        st.dataframe(
+                            disp.sort_values("漲跌%", ascending=False, key=lambda x: pd.to_numeric(x, errors="coerce")),
+                            use_container_width=True,
+                            height=350,
+                        )
+
+                        # 個股快速展開
+                        st.markdown("**點選個股查看信號摘要**")
+                        sel_ticker_heat = st.selectbox(
+                            "個股",
+                            grp_df["ticker"].tolist(),
+                            format_func=lambda t: f"{t} {grp_df.loc[grp_df['ticker']==t,'name'].values[0] if not grp_df.loc[grp_df['ticker']==t,'name'].empty else ''}",
+                            key="heat_sel_ticker",
+                        )
+                        if sel_ticker_heat:
+                            srow = grp_df[grp_df["ticker"] == sel_ticker_heat].iloc[0]
+                            with st.expander(f"📡 {sel_ticker_heat} 信號摘要", expanded=True):
+                                m1, m2, m3, m4 = st.columns(4)
+                                m1.metric("收盤", f"{srow.get('close', '-')}")
+                                chg = srow.get("change_pct", 0) or 0
+                                m2.metric("漲跌%", f"{chg:+.2f}%", delta=f"{chg:+.2f}%")
+                                m3.metric("外資淨(千股)", f"{int(srow.get('foreign_net', 0) or 0):+,}")
+                                m4.metric("20日機率", f"{srow.get('prob20', '-')}%")
+
+                                c_inst, c_tech, c_news = st.columns(3)
+                                with c_inst:
+                                    st.markdown("**籌碼信號**")
+                                    fn  = int(srow.get("foreign_net", 0) or 0)
+                                    tn  = int(srow.get("trust_net", 0) or 0)
+                                    dn  = int(srow.get("dealer_net", 0) or 0)
+                                    st.write(f"外資：{'🟢 買超' if fn > 0 else '🔴 賣超' if fn < 0 else '⬜ 持平'} {fn:+,} 千股")
+                                    st.write(f"投信：{'🟢 買超' if tn > 0 else '🔴 賣超' if tn < 0 else '⬜ 持平'} {tn:+,} 千股")
+                                    st.write(f"自營：{'🟢 買超' if dn > 0 else '🔴 賣超' if dn < 0 else '⬜ 持平'} {dn:+,} 千股")
+
+                                with c_tech:
+                                    st.markdown("**技術信號**")
+                                    ms = srow.get("momentum_score", 50) or 50
+                                    lv = srow.get("low_vol_score", 50) or 50
+                                    st.write(f"動能分：{ms:.0f} {'🔥' if ms >= 70 else '❄️' if ms <= 30 else '➡️'}")
+                                    st.write(f"低波動分：{lv:.0f}")
+                                    td = st.session_state.get("tech_data", {}).get(sel_ticker_heat, {})
+                                    rsi = td.get("rsi")
+                                    if rsi:
+                                        st.write(f"RSI(14)：{rsi:.1f} {'🔥超買' if rsi > 70 else '❄️超賣' if rsi < 30 else '正常'}")
+
+                                with c_news:
+                                    st.markdown("**新聞情緒**")
+                                    ss = srow.get("sentiment_score")
+                                    if ss is not None:
+                                        lbl = "🟢 正面" if ss > 0.2 else "🔴 負面" if ss < -0.2 else "🟡 中性"
+                                        st.write(f"情緒：{lbl} ({ss:+.2f})")
+                                    else:
+                                        st.write("情緒：暫無資料")
+
+                                if st.button("🔍 完整分析", key=f"heat_goto_{sel_ticker_heat}"):
+                                    st.session_state["goto_ticker"] = sel_ticker_heat
+                                    st.rerun()
+
+    # ========== Tab 7: 產業總覽 ==========
+    with tabs[7]:
         st.subheader("📊 產業 / 概念股瀏覽器")
         if model_df.empty:
             st.warning("⚠️ 請先載入市場資料")
@@ -1947,8 +2190,8 @@ def main():
                 fig.add_vline(x=0, line_dash="dash", line_color="green", opacity=0.5)
                 st.plotly_chart(fig, use_container_width=True)
 
-    # ========== Tab 7: 模型設定 ==========
-    with tabs[7]:
+    # ========== Tab 8: 模型設定 ==========
+    with tabs[8]:
         st.subheader("模型設定與權重")
 
         # ── FinMind Token 設定 ──
@@ -2125,8 +2368,8 @@ def main():
                 except Exception as e:
                     st.error(f"❌ 備份檔格式錯誤：{e}")
 
-    # ========== Tab 8: 回測報告 ==========
-    with tabs[8]:
+    # ========== Tab 9: 回測報告 ==========
+    with tabs[9]:
         st.subheader("回測報告")
         sc = len(st.session_state.snapshots)
         if sc < 5:

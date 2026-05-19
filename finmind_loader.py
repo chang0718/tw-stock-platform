@@ -87,36 +87,87 @@ class FinMindLoader:
 
     # ── 主要方法 ───────────────────────────────────────────────────
 
-    def get_fundamental(self, ticker: str) -> Dict:
-        """
-        取得個股完整基本面（月營收 + 季報 + 本益比）
-        7 天快取，同一檔重複查詢瞬間回傳
-        """
-        key = f"fm:{ticker}"
-        cached = self._hit(key)
-        if cached is not None:
-            return cached
+    def _yfinance_fundamental(self, ticker: str) -> Optional[Dict]:
+        """yfinance 主力基本面（PE/EPS/毛利率/ROE 等）"""
+        if not _HAS_YFINANCE:
+            return None
+        try:
+            info = yf.Ticker(f"{ticker}.TW").info
+            if not info:
+                return None
+            pe  = info.get("trailingPE") or info.get("forwardPE")
+            pb  = info.get("priceToBook")
+            dy  = info.get("dividendYield")
+            eps = info.get("trailingEps")
+            ry  = info.get("revenueGrowth")
+            gm  = info.get("grossMargins")
+            nm  = info.get("profitMargins")
+            roe = info.get("returnOnEquity")
+            de  = info.get("debtToEquity")
+            mc  = info.get("marketCap")
+            h52 = info.get("fiftyTwoWeekHigh")
+            l52 = info.get("fiftyTwoWeekLow")
+            if not any(v is not None for v in [pe, pb, dy, eps, gm]):
+                return None
+            return {
+                "pe":                   _f(pe),
+                "pb":                   _f(pb),
+                "eps":                  _f(eps),
+                "dividend_yield":       _f(dy * 100) if dy else None,
+                "gross_margin":         _f(gm * 100) if gm else None,
+                "net_margin":           _f(nm * 100) if nm else None,
+                "revenue_yoy":          _f(ry * 100) if ry else None,
+                "roe":                  _f(roe * 100) if roe else None,
+                "debt_equity":          _f(de),
+                "market_cap":           mc,
+                "high_52w":             _f(h52),
+                "low_52w":              _f(l52),
+                # fields not available from yfinance – will be filled by FinMind
+                "revenue_mom":          None,
+                "latest_revenue_month": None,
+                "eps_growth_yoy":       None,
+                "data_source":          "✅ Yahoo Finance",
+                "data_type":            "REAL",
+            }
+        except Exception:
+            return None
 
-        out = {
-            "revenue_yoy": None,
-            "revenue_mom": None,
-            "latest_revenue_month": None,
-            "eps": None,
-            "eps_growth_yoy": None,
-            "gross_margin": None,
-            "net_margin": None,
-            "pe": None,
-            "pb": None,
-            "dividend_yield": None,
-            "data_source": "⚠️ 暫無數據",
-            "data_type": "NO_DATA",
-        }
-        has = False
-
-        # ── 月營收 ──
+    def _finmind_revenue_only(self, ticker: str) -> Optional[Dict]:
+        """只抓 FinMind 月營收（補 yfinance 缺少的 MoM/YoY），節省 API 配額"""
         rows = self._api(
             "TaiwanStockMonthRevenue",
             ticker,
+            (datetime.now() - timedelta(days=400)).strftime("%Y-%m-%d"),
+        )
+        if not rows or len(rows) < 2:
+            return None
+        df = pd.DataFrame(rows).sort_values("date")
+        rev = df["revenue"].astype(float)
+        result = {"latest_revenue_month": df.iloc[-1]["date"]}
+        if rev.iloc[-2] != 0:
+            result["revenue_mom"] = round(
+                (rev.iloc[-1] - rev.iloc[-2]) / abs(rev.iloc[-2]) * 100, 2
+            )
+        if len(df) >= 13 and rev.iloc[-13] != 0:
+            result["revenue_yoy"] = round(
+                (rev.iloc[-1] - rev.iloc[-13]) / abs(rev.iloc[-13]) * 100, 2
+            )
+        return result
+
+    def _finmind_fundamental(self, ticker: str) -> Dict:
+        """完整 FinMind 基本面（月營收 + 季報 + 本益比）"""
+        out = {
+            "revenue_yoy": None, "revenue_mom": None,
+            "latest_revenue_month": None, "eps": None,
+            "eps_growth_yoy": None, "gross_margin": None,
+            "net_margin": None, "pe": None, "pb": None,
+            "dividend_yield": None,
+            "data_source": "⚠️ 暫無數據", "data_type": "NO_DATA",
+        }
+        has = False
+
+        rows = self._api(
+            "TaiwanStockMonthRevenue", ticker,
             (datetime.now() - timedelta(days=400)).strftime("%Y-%m-%d"),
         )
         if rows and len(rows) >= 2:
@@ -133,10 +184,8 @@ class FinMindLoader:
                 )
             has = True
 
-        # ── 財務報表（季報）──
         rows = self._api(
-            "TaiwanStockFinancialStatements",
-            ticker,
+            "TaiwanStockFinancialStatements", ticker,
             (datetime.now() - timedelta(days=365 * 3)).strftime("%Y-%m-%d"),
         )
         if rows:
@@ -165,10 +214,8 @@ class FinMindLoader:
             except Exception:
                 pass
 
-        # ── 本益比 / 股價淨值比 ──
         rows = self._api(
-            "TaiwanStockPER",
-            ticker,
+            "TaiwanStockPER", ticker,
             (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d"),
         )
         if rows:
@@ -182,32 +229,32 @@ class FinMindLoader:
         if has:
             out["data_source"] = "✅ FinMind API"
             out["data_type"] = "REAL"
+        return out
 
-        # yfinance 備援：FinMind 無數據時嘗試取得基本指標
-        if not has and _HAS_YFINANCE:
-            try:
-                info = yf.Ticker(f"{ticker}.TW").info
-                pe  = info.get("trailingPE") or info.get("forwardPE")
-                pb  = info.get("priceToBook")
-                dy  = info.get("dividendYield")
-                eps = info.get("trailingEps")
-                ry  = info.get("revenueGrowth")
-                gm  = info.get("grossMargins")
-                nm  = info.get("profitMargins")
-                if any(v is not None for v in [pe, pb, dy, eps]):
-                    out["pe"]             = _f(pe)
-                    out["pb"]             = _f(pb)
-                    out["dividend_yield"] = _f(dy * 100) if dy else None
-                    out["eps"]            = _f(eps)
-                    out["revenue_yoy"]    = _f(ry * 100) if ry else None
-                    out["gross_margin"]   = _f(gm * 100) if gm else None
-                    out["net_margin"]     = _f(nm * 100) if nm else None
-                    out["data_source"]    = "✅ yfinance (備援)"
-                    out["data_type"]      = "REAL"
-                    has = True
-            except Exception:
-                pass
+    def get_fundamental(self, ticker: str) -> Dict:
+        """
+        取得個股完整基本面。優先 Yahoo Finance（無限制），
+        補充 FinMind 月營收（Yahoo 無此欄位）；Yahoo 無資料時 fallback 到 FinMind。
+        7 天快取。
+        """
+        key = f"fm:{ticker}"
+        cached = self._hit(key)
+        if cached is not None:
+            return cached
 
+        # 1. yfinance 主力
+        out = self._yfinance_fundamental(ticker)
+        if out:
+            # 補 FinMind 月營收（YoY/MoM）
+            rev = self._finmind_revenue_only(ticker)
+            if rev:
+                out.update(rev)
+                out["data_source"] = "✅ Yahoo Finance + FinMind月營收"
+            self._put(key, out)
+            return out
+
+        # 2. FinMind 完整備援
+        out = self._finmind_fundamental(ticker)
         self._put(key, out)
         return out
 
