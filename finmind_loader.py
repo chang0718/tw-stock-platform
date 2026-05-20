@@ -14,6 +14,12 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 try:
+    from scipy import stats as _sp_stats
+    _HAS_SCIPY = True
+except ImportError:
+    _HAS_SCIPY = False
+
+try:
     import yfinance as yf
     _HAS_YFINANCE = True
 except ImportError:
@@ -338,6 +344,97 @@ class FinMindLoader:
             return out
         except Exception:
             return []
+
+    def get_per_trend(self, ticker: str, months: int = 36) -> List[Dict]:
+        """
+        取得個股 PE/PB/DY 歷史趨勢（FinMind TaiwanStockPER）
+        回傳：[{date, pe, pb, dy}]，按日期排序，用於歷史分位數與趨勢圖
+        """
+        key = f"per_trend:{ticker}"
+        cached = self._hit(key)
+        if cached is not None:
+            return cached
+
+        start = (datetime.now() - timedelta(days=30 * months + 30)).strftime("%Y-%m-%d")
+        rows = self._api("TaiwanStockPER", ticker, start)
+        if not rows:
+            self._put(key, [])
+            return []
+
+        df = pd.DataFrame(rows).sort_values("date")
+        result = [
+            {
+                "date": str(r["date"])[:10],
+                "pe":   _f(r.get("PER")),
+                "pb":   _f(r.get("PBR")),
+                "dy":   _f(r.get("dividend_yield")),
+            }
+            for _, r in df.iterrows()
+        ]
+        out = result[-months * 22:]  # 每月約22交易日
+        self._put(key, out)
+        return out
+
+    def get_valuation_percentile(self, ticker: str) -> Dict:
+        """
+        計算目前 PE/PB/DY 在歷史（3年）中的分位數
+        回傳：{pe_pct, pb_pct, dy_pct, pe_curr, pb_curr, dy_curr, status, suggestion}
+        分位數低 = 便宜（PE低/PB低/DY高）
+        """
+        trend = self.get_per_trend(ticker, months=36)
+        fund  = self.get_fundamental(ticker)
+
+        result: Dict = {
+            "pe_curr": fund.get("pe"),
+            "pb_curr": fund.get("pb"),
+            "dy_curr": fund.get("dividend_yield"),
+            "pe_pct":  None, "pb_pct": None, "dy_pct": None,
+            "status":  "⚪ 資料不足",
+            "suggestion": "歷史估值資料不足，無法判斷高低估",
+        }
+
+        if not trend:
+            return result
+
+        pe_hist = [r["pe"] for r in trend if r["pe"] is not None]
+        pb_hist = [r["pb"] for r in trend if r["pb"] is not None]
+        dy_hist = [r["dy"] for r in trend if r["dy"] is not None]
+
+        def _pct(val, hist):
+            if val is None or not hist:
+                return None
+            if _HAS_SCIPY:
+                return round(_sp_stats.percentileofscore(hist, val, kind="rank"), 1)
+            # 不依賴 scipy：手算
+            below = sum(1 for h in hist if h <= val)
+            return round(below / len(hist) * 100, 1)
+
+        pe_pct = _pct(result["pe_curr"], pe_hist)
+        pb_pct = _pct(result["pb_curr"], pb_hist)
+        # DY 分位數反轉：DY 越高越便宜，所以用 100 - pct
+        dy_pct_raw = _pct(result["dy_curr"], dy_hist)
+        dy_pct = round(100 - dy_pct_raw, 1) if dy_pct_raw is not None else None
+
+        result.update({"pe_pct": pe_pct, "pb_pct": pb_pct, "dy_pct": dy_pct})
+
+        # 綜合判斷（取有效分位數的平均）
+        valid_pcts = [p for p in [pe_pct, pb_pct, dy_pct] if p is not None]
+        if valid_pcts:
+            avg = sum(valid_pcts) / len(valid_pcts)
+            if avg < 25:
+                result["status"]     = "🟢 歷史低估區"
+                result["suggestion"] = f"PE/PB/DY 綜合分位數 {avg:.0f}%，目前估值偏低，具備安全邊際"
+            elif avg < 50:
+                result["status"]     = "🟡 合理偏低"
+                result["suggestion"] = f"PE/PB/DY 綜合分位數 {avg:.0f}%，估值合理偏低，可逐步觀察"
+            elif avg < 75:
+                result["status"]     = "🟡 合理偏高"
+                result["suggestion"] = f"PE/PB/DY 綜合分位數 {avg:.0f}%，估值偏高，建議等待更好買點"
+            else:
+                result["status"]     = "🔴 歷史高估區"
+                result["suggestion"] = f"PE/PB/DY 綜合分位數 {avg:.0f}%，估值偏高，追高風險大"
+
+        return result
 
     def get_price_history(self, ticker: str, days: int = 120) -> Optional[pd.DataFrame]:
         """

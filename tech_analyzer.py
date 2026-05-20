@@ -137,6 +137,10 @@ def analyze(df: pd.DataFrame, ticker: str = "", name: str = "") -> Dict:
     atr   = calc_atr(df)
     vol_ma20 = volume.rolling(20).mean()
 
+    # 乖離率 (BIAS) = (收盤 - 均線) / 均線 × 100
+    bias20 = ((close - ma20) / ma20 * 100).round(2)
+    bias60 = ((close - ma60) / ma60 * 100).round(2)
+
     last    = close.iloc[-1]
     last_rsi       = rsi.iloc[-1]
     last_macd      = macd_line.iloc[-1]
@@ -151,6 +155,8 @@ def analyze(df: pd.DataFrame, ticker: str = "", name: str = "") -> Dict:
     last_atr       = atr.iloc[-1]
     last_vol       = volume.iloc[-1]
     last_vol_ma    = vol_ma20.iloc[-1]
+    last_bias20    = bias20.iloc[-1] if not np.isnan(bias20.iloc[-1]) else None
+    last_bias60    = bias60.iloc[-1] if not np.isnan(bias60.iloc[-1]) else None
 
     # ── 訊號判斷 ──
     signals: List[str] = []
@@ -242,6 +248,22 @@ def analyze(df: pd.DataFrame, ticker: str = "", name: str = "") -> Dict:
             score += 1 if day_chg > 0 else -1
         elif vol_ratio < 0.5:
             signals.append("🟡 縮量（觀望氣氛濃）")
+
+    # 乖離率 (BIAS)
+    if last_bias20 is not None:
+        if last_bias20 > 15:
+            signals.append(f"🔴 MA20乖離率 +{last_bias20:.1f}%，短線過熱，留意回檔風險")
+            score -= 1
+        elif last_bias20 > 8:
+            signals.append(f"🟡 MA20乖離率 +{last_bias20:.1f}%，偏高，短線宜謹慎追高")
+        elif last_bias20 < -15:
+            signals.append(f"🟢 MA20乖離率 {last_bias20:.1f}%，深度超賣，技術反彈機率高")
+            score += 2
+        elif last_bias20 < -8:
+            signals.append(f"🟢 MA20乖離率 {last_bias20:.1f}%，短線超賣，可逢低分批觀察")
+            score += 1
+        else:
+            signals.append(f"🟡 MA20乖離率 {last_bias20:.1f}%（合理區間）")
 
     # ── 長期均線訊號 ──
     last_ma120 = ma120.iloc[-1] if not np.isnan(ma120.iloc[-1]) else None
@@ -369,6 +391,8 @@ def analyze(df: pd.DataFrame, ticker: str = "", name: str = "") -> Dict:
             "bb_upper":    bb_up.tolist(),
             "bb_lower":    bb_dn.tolist(),
             "vol_ma20":    vol_ma20.tolist(),
+            "bias20":      bias20.tolist(),
+            "bias60":      bias60.tolist(),
         },
         "analysis": {
             "score":         score,
@@ -388,5 +412,7 @@ def analyze(df: pd.DataFrame, ticker: str = "", name: str = "") -> Dict:
             "atr":           round(atr_val, 2),
             "ma120":         round(last_ma120, 2) if last_ma120 is not None else None,
             "ma240":         round(last_ma240, 2) if last_ma240 is not None else None,
+            "bias20":        round(last_bias20, 2) if last_bias20 is not None else None,
+            "bias60":        round(last_bias60, 2) if last_bias60 is not None else None,
         },
     }

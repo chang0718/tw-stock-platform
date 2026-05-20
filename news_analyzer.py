@@ -62,6 +62,23 @@ _MACRO_QUERIES = [
     ("美股 道瓊 納指 本週",    "美股指數"),
 ]
 
+# 產業題材特定關鍵字（建廠/報價/技術世代）
+_INDUSTRY_QUERIES = [
+    ("台積電 CoWoS 先進封裝 擴產",     "半導體封裝"),
+    ("NAND DRAM 記憶體 報價",          "記憶體報價"),
+    ("面板 報價 供需",                  "面板報價"),
+    ("太陽能 儲能 補貼 政策",          "綠能政策"),
+    ("電動車 台灣 供應商 訂單",        "電動車供應"),
+    ("AI 伺服器 訂單 台廠",            "AI伺服器訂單"),
+    ("CoWoS 液冷 散熱 建廠",          "產能建置"),
+    ("光通訊 800G 1.6T 需求",         "光通訊世代"),
+    ("晶圓代工 報價 漲價",             "晶圓報價"),
+    ("PCB 銅箔基板 報價",              "PCB報價"),
+    ("被動元件 MLCC 報價",             "被動元件報價"),
+    ("台積電 美國 日本 建廠",          "台積電海外建廠"),
+    ("機器人 自動化 AI 台廠",          "機器人自動化"),
+]
+
 
 class NewsAnalyzer:
 
@@ -427,5 +444,63 @@ class NewsAnalyzer:
 
         results.sort(key=lambda x: x["published"], reverse=True)
         out = results[:30]
+        self._put(key, out)
+        return out
+
+    def fetch_industry_events(self, supply_chain: str = "") -> List[Dict]:
+        """
+        抓取產業題材新聞（建廠/報價/技術世代等）
+        supply_chain: 可指定篩選特定供應鏈關鍵字，留空=全部
+        回傳: [{category, title, link, published, source}]
+        """
+        if not _HAS_FEEDPARSER:
+            return []
+
+        key = f"industry_events:{supply_chain}"
+        cached = self._hit(key)
+        if cached is not None:
+            return cached
+
+        import urllib.parse
+        cutoff  = datetime.now() - timedelta(days=14)
+        results = []
+
+        queries = _INDUSTRY_QUERIES
+        if supply_chain:
+            # 只抓與 supply_chain 關鍵字相關的
+            queries = [(q, cat) for q, cat in _INDUSTRY_QUERIES
+                       if any(kw in supply_chain for kw in q.split()[:3])
+                       or any(kw in q for kw in supply_chain.split()[:2])]
+            if not queries:
+                queries = _INDUSTRY_QUERIES[:5]  # fallback to first 5
+
+        for query, category in queries:
+            try:
+                gurl = _GOOGLE_NEWS_RSS.format(query=urllib.parse.quote(query))
+                feed = feedparser.parse(gurl)
+                for entry in feed.entries[:4]:
+                    title = entry.get("title", "")
+                    try:
+                        pub = (
+                            datetime(*entry.published_parsed[:6])
+                            if hasattr(entry, "published_parsed") and entry.published_parsed
+                            else datetime.now()
+                        )
+                    except Exception:
+                        pub = datetime.now()
+                    if pub < cutoff:
+                        continue
+                    results.append({
+                        "category":  category,
+                        "title":     title,
+                        "link":      entry.get("link", ""),
+                        "published": pub.strftime("%Y-%m-%d %H:%M"),
+                        "source":    "google_news",
+                    })
+            except Exception:
+                continue
+
+        results.sort(key=lambda x: x["published"], reverse=True)
+        out = results[:25]
         self._put(key, out)
         return out

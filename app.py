@@ -28,6 +28,7 @@ import streamlit as st
 from config import (
     CONCEPT_STOCKS,
     SUPPLY_CHAIN_GROUPS,
+    SUPPLY_CHAIN_TREE,
     DEFAULT_WEIGHTS,
     DISPLAY_COLUMNS,
     NOTES_FILE,
@@ -45,6 +46,8 @@ from twse_institutional import TWSeInstitutionalLoader
 from news_analyzer import NewsAnalyzer
 from tech_analyzer import analyze as tech_analyze, INDICATOR_EXPLANATIONS
 from us_market import USMarketLoader, US_TW_SUPPLY_CHAIN, TW_INDUSTRY_CHAIN, US_INDICES, US_KEY_STOCKS
+from macro_loader import MacroLoader
+from institutional_tracker import InstitutionalTracker, TRACKED_FUNDS
 from signal_engine import SignalEngine
 from portfolio import Portfolio
 
@@ -248,6 +251,15 @@ def load_watchlist_data():
 
 def apply_filters(df: pd.DataFrame, filters: Dict) -> pd.DataFrame:
     result = df.copy()
+
+    # 供應鏈過濾（新）：優先於產業別，真正限縮股票池
+    selected_scs = filters.get("supply_chains", [])
+    if selected_scs:
+        allowed: set = set()
+        for sc in selected_scs:
+            allowed |= set(SUPPLY_CHAIN_GROUPS.get(sc, []))
+        result = result[result["ticker"].isin(allowed)]
+
     if filters["industry"] != "全部":
         result = result[result["group"] == filters["industry"]]
     if filters["market"] != "全部":
@@ -268,7 +280,11 @@ def apply_filters(df: pd.DataFrame, filters: Dict) -> pd.DataFrame:
     if not filters["include_uncategorized"]:
         result = result[result["group"] != "未分類"]
     if not result.empty:
-        result = result.sort_values(filters["sort_by"], ascending=filters["sort_ascending"])
+        result = result.sort_values(
+            filters["sort_by"],
+            ascending=filters["sort_ascending"],
+            key=lambda x: pd.to_numeric(x, errors="coerce"),
+        )
         result = result.head(filters["display_count"])
     return result
 
@@ -305,7 +321,31 @@ def render_sidebar(universe_df: pd.DataFrame) -> Dict:
 
     filters: Dict = {}
 
-    st.sidebar.markdown("### 🔍 基本篩選")
+    # ── 供應鏈兩層選擇 ─────────────────────────────────────────
+    st.sidebar.markdown("### 🏭 供應鏈篩選")
+    sc_categories = ["全部產業"] + list(SUPPLY_CHAIN_TREE.keys())
+    sc_category = st.sidebar.selectbox("大類", sc_categories, key="sc_category")
+
+    if sc_category == "全部產業":
+        sub_options: list = []
+        selected_scs: list = []
+    else:
+        sub_options = SUPPLY_CHAIN_TREE.get(sc_category, [])
+        selected_scs = st.sidebar.multiselect(
+            "子供應鏈（多選，空=整個大類）",
+            sub_options,
+            default=[],
+            key="sc_sub",
+        )
+        if not selected_scs:
+            selected_scs = sub_options  # 空選 = 整個大類全選
+    filters["supply_chains"] = selected_scs
+
+    if selected_scs:
+        total_tickers = sum(len(SUPPLY_CHAIN_GROUPS.get(sc, [])) for sc in selected_scs)
+        st.sidebar.caption(f"篩選範圍：{len(selected_scs)} 個子鏈 / 約 {total_tickers} 支成分股")
+
+    st.sidebar.markdown("### 🔍 其他篩選")
     filters["industry"] = st.sidebar.selectbox("產業別", ["全部"] + available_groups, key="industry_filter")
     filters["market"]   = st.sidebar.selectbox("市場",   ["全部"] + available_markets, key="market_filter")
     filters["query"]    = st.sidebar.text_input("自由搜尋", placeholder="代號、名稱、產業...", key="search_query")
@@ -952,97 +992,140 @@ def main():
 
     # ========== Tab 0: 整體分析 ==========
     with tabs[0]:
-        st.subheader("🏆 整體分析 - TOP 10 最值得投資標的")
+        st.subheader("🏆 整體分析 - 多面向綜合推薦")
         if model_df.empty:
-            st.warning("⚠️ 沒有資料")
+            st.warning("⚠️ 沒有資料，請先點擊左側「載入市場資料」")
         else:
-            top10 = model_df.nlargest(10, "final_composite").copy()
+            top10 = filtered_df.head(10).copy() if not filtered_df.empty else model_df.nlargest(10, "final_composite").copy()
 
-            st.markdown("### 📊 核心推薦指標")
+            # ── 市場概況摘要 ──────────────────────────────────────────
+            sc_label = f" ({sc_category})" if sc_category != "全部產業" else ""
+            st.markdown(f"### 📊 市場概況摘要{sc_label}")
             tc1, tc2, tc3, tc4 = st.columns(4)
-            tc1.metric("平均20日機率", f"{top10['prob20'].mean():.1f}%", delta=f"{top10['prob20'].mean()-50:.1f}%" if top10['prob20'].mean() > 50 else None)
-            tc2.metric("平均信心度",   f"{top10['confidence'].mean():.1f}%")
-            tc3.metric("核心候選數",   f"{(top10['candidate_level']=='核心候選').sum()}/10")
-            tc4.metric("平均風險",     f"{top10['risk_score'].mean():.1f}", delta_color="inverse")
+            _risers = (model_df["change_pct"] > 0).sum() if "change_pct" in model_df.columns else 0
+            _fallers = (model_df["change_pct"] < 0).sum() if "change_pct" in model_df.columns else 0
+            tc1.metric("今日上漲", f"{_risers} 支", help="收盤較前日上漲的股票數量")
+            tc2.metric("今日下跌", f"{_fallers} 支", delta_color="inverse", help="收盤較前日下跌的股票數量")
+            tc3.metric("核心候選", f"{(top10['candidate_level']=='核心候選').sum()}/10",
+                       help="前10推薦中符合核心候選條件（基本面+技術+籌碼均偏多）的數量")
+            _avg_rsk = top10["risk_score"].mean() if "risk_score" in top10.columns else 50
+            tc4.metric("平均風險分", f"{_avg_rsk:.0f}/100",
+                       delta_color="inverse",
+                       help="0=極低風險，100=極高風險。<40偏穩健，>70需謹慎。")
+            st.caption("⚠️ 以上指標為統計模型輸出，不構成投資建議。排序依籌碼+技術+基本面三面向綜合評估。")
             st.markdown("---")
 
-            st.markdown("### 📋 TOP 10 詳細清單")
+            st.markdown("### 📋 推薦清單（依綜合評估排序）")
             for idx, (_, stock) in enumerate(top10.iterrows(), 1):
                 emoji = {"核心候選": "⭐", "觀察候選": "👀", "高風險觀察": "⚠️"}.get(stock["candidate_level"], "🛡️")
+                chg = stock.get("change_pct", 0) or 0
+                chg_str = f"{'▲' if chg >= 0 else '▼'}{abs(chg):.2f}%"
                 with st.expander(
-                    f"**#{idx}** {emoji} **{stock['ticker']} {stock['name']}** — "
-                    f"{stock['group']} | {stock['market']} | {stock['candidate_level']}",
+                    f"**#{idx}** {emoji} **{stock['ticker']} {stock['name']}** | "
+                    f"{chg_str} | {stock['group']} | {stock['market']}",
                     expanded=(idx <= 3),
                 ):
-                    sc1, sc2, sc3, sc4, sc5, sc6 = st.columns(6)
-                    sc1.metric("收盤價",  f"${stock['close']:.2f}" if stock.get('close') is not None else "--")
-                    sc2.metric("📅 1週漲機率",  f"{stock['prob5']:.1f}%",
-                               help="未來5個交易日股價上漲的可能性，>60% 看多")
-                    sc3.metric("📅 1月漲機率", f"{stock['prob20']:.1f}%",
-                               help="未來1個月股價上漲的可能性，最重要的參考指標")
-                    sc4.metric("📅 3月漲機率", f"{stock['prob60']:.1f}%",
-                               help="未來3個月的趨勢方向，長線投資人參考")
-                    sc5.metric("🎯 預測可靠性",   f"{stock['confidence']:.1f}%",
-                               help=">70% 訊號較可靠；<50% 不確定性高")
-                    sc6.metric("💰 預估1月報酬", f"{stock['expected_return_20d']:+.1f}%" if pd.notna(stock.get("expected_return_20d")) else "N/A",
-                               help="統計估算的預期報酬，非保證獲利")
+                    # ── 行情摘要 ─────────────────────────────────────
+                    pr1, pr2, pr3, pr4 = st.columns(4)
+                    pr1.metric("收盤價", f"NT${stock['close']:.0f}" if pd.notna(stock.get("close")) else "--",
+                               help="今日收盤價（元）")
+                    pr2.metric("今日漲跌", chg_str, delta=f"{chg:+.2f}%",
+                               help="今日漲跌幅。正值=上漲，負值=下跌。")
+                    vol = stock.get("volume", 0) or 0
+                    pr3.metric("成交量", f"{int(vol):,} 張" if vol > 0 else "--",
+                               help="今日成交量（張=1000股）。成交量大代表市場關注度高。")
+                    pr4.metric("風險等級", stock.get("candidate_level", "--"),
+                               help="核心候選=多面向偏多；觀察候選=部分指標偏多；高風險=波動較大請謹慎。")
 
-                    st.markdown("##### 六大評分（100分滿分，>60分代表正面信號）")
-                    fc1, fc2, fc3 = st.columns(3)
-                    with fc1:
-                        st.write(f"📈 近期漲勢（動能）: **{stock['momentum_score']:.0f}**/100")
-                        st.write(f"🚀 成長速度（營收/獲利）: **{stock['growth_score']:.0f}**/100")
-                    with fc2:
-                        st.write(f"💎 獲利品質（毛利/淨利）: **{stock['quality_score']:.0f}**/100")
-                        st.write(f"🏷️ 股價便宜程度（價值）: **{stock['value_score']:.0f}**/100")
-                    with fc3:
-                        st.write(f"🏦 大戶買賣方向（籌碼）: **{stock['flow_score']:.0f}**/100")
-                        st.write(f"🪨 股價穩定程度（低波動）: **{stock['low_vol_score']:.0f}**/100")
+                    # ── 三面向信號 ───────────────────────────────────
+                    s_inst, s_tech, s_fund = st.columns(3)
 
-                    # 數據來源標籤
-                    tags = []
-                    if stock.get("has_real_fund"):
-                        tags.append("✅ 真實基本面")
-                    else:
-                        tags.append("⚠️ 基本面待載入")
-                    if stock.get("has_real_flow"):
-                        tags.append("✅ 真實籌碼")
-                    else:
-                        tags.append("⚠️ 籌碼待載入")
-                    path = stock.get("scoring_path", "技術動能")
-                    tags.append(f"{'📊' if path == '完整' else '📈'} 評分路徑: {path}")
-                    st.caption(" | ".join(tags))
+                    with s_inst:
+                        st.markdown("**🏦 籌碼信號**")
+                        _inst_d = st.session_state.institutional_data.get("inst", {}).get(stock["ticker"], {})
+                        _fn = int(_inst_d.get("foreign_net", 0) or 0)
+                        _tn = int(_inst_d.get("trust_net",   0) or 0)
+                        _dn = int(_inst_d.get("dealer_net",  0) or 0)
+                        if _fn > 0:   st.write(f"🟢 外資買超 {_fn:+,} 千股")
+                        elif _fn < 0: st.write(f"🔴 外資賣超 {_fn:+,} 千股")
+                        else:         st.write("⬜ 外資 持平/無資料")
+                        if _tn > 0:   st.write(f"🟢 投信買超 {_tn:+,} 千股")
+                        elif _tn < 0: st.write(f"🔴 投信賣超 {_tn:+,} 千股")
+                        else:         st.write("⬜ 投信 持平/無資料")
+                        ms = stock.get("flow_score", 50) or 50
+                        st.caption(f"籌碼強度：{'強 🔥' if ms >= 70 else '弱 ❄️' if ms <= 30 else '中 ➡️'}")
 
-                    # 信號晶片
-                    _sig_chips = []
-                    _fn = st.session_state.institutional_data.get("inst", {}).get(stock["ticker"], {}).get("foreign_net", 0) or 0
-                    _tn = st.session_state.institutional_data.get("inst", {}).get(stock["ticker"], {}).get("trust_net", 0) or 0
-                    if _fn > 0:  _sig_chips.append("🟢外資買超")
-                    elif _fn < 0: _sig_chips.append("🔴外資賣超")
-                    if _tn > 0:  _sig_chips.append("🟢投信買超")
-                    elif _tn < 0: _sig_chips.append("🔴投信賣超")
+                    with s_tech:
+                        st.markdown("**📈 技術信號**")
+                        _td = st.session_state.tech_data.get(stock["ticker"], {})
+                        _ana = _td.get("analysis", {}) if _td else {}
+                        _ind = _td.get("indicators", {}) if _td else {}
+                        _rsi = _ana.get("rsi")
+                        _macd_l = _ind.get("macd", [])
+                        _macd_s = _ind.get("macd_signal", [])
+                        if _rsi is not None:
+                            rsi_lbl = "🔥 超買" if _rsi > 70 else "❄️ 超賣" if _rsi < 30 else "✅ 正常"
+                            st.write(f"RSI {_rsi:.0f}：{rsi_lbl}")
+                        if _macd_l and _macd_s:
+                            cross = "⬆️ MACD 金叉" if _macd_l[-1] > _macd_s[-1] else "⬇️ MACD 死叉"
+                            st.write(cross)
+                        _bias20 = _ana.get("bias20")
+                        if _bias20 is not None:
+                            bias_lbl = "⚠️ 過熱" if _bias20 > 10 else "💡 超賣" if _bias20 < -10 else "✅ 正常"
+                            st.write(f"MA20乖離 {_bias20:+.1f}%：{bias_lbl}")
+                        ms2 = stock.get("momentum_score", 50) or 50
+                        if not any([_rsi, _macd_l, _bias20]):
+                            st.write(f"動能分：{'強 🔥' if ms2 >= 70 else '弱 ❄️' if ms2 <= 30 else '中 ➡️'} ({ms2:.0f}/100)")
+                        st.caption("技術面以近期趨勢為主，不保證持續性。")
+
+                    with s_fund:
+                        st.markdown("**📊 基本面亮點**")
+                        _fdata = st.session_state.stock_fundamentals.get(stock["ticker"]) or \
+                                 st.session_state.watchlist_data.get(stock["ticker"], {}).get("fundamental") or {}
+                        _pe  = _fdata.get("pe")
+                        _gm  = _fdata.get("gross_margin")
+                        _yoy = _fdata.get("revenue_yoy")
+                        _dy  = _fdata.get("dividend_yield")
+                        if _pe:
+                            pe_lbl = "🏷️ 便宜" if _pe < 15 else "🟡 合理" if _pe < 25 else "🔴 偏貴"
+                            st.write(f"本益比 {_pe:.1f}x：{pe_lbl}")
+                        if _gm:
+                            st.write(f"毛利率 {_gm:.1f}%：{'優秀 💎' if _gm > 40 else '正常 ✅' if _gm > 20 else '偏低 ⚠️'}")
+                        if _yoy is not None:
+                            st.write(f"營收年增 {_yoy:+.1f}%：{'成長 📈' if _yoy > 10 else '衰退 📉' if _yoy < -10 else '平穩 ➡️'}")
+                        if _dy:
+                            st.write(f"殖利率 {_dy:.1f}%：{'高息 💰' if _dy > 4 else '普通' if _dy > 2 else '低息'}")
+                        if not any([_pe, _gm, _yoy]):
+                            qs = stock.get("quality_score", 50) or 50
+                            vs = stock.get("value_score", 50) or 50
+                            st.write(f"品質分 {qs:.0f}/100　價值分 {vs:.0f}/100")
+                            st.caption("尚無基本面資料（點選個股分析自動載入）")
+
+                    # ── 新聞情緒 ──────────────────────────────────────
                     _ss = stock.get("sentiment_score")
-                    if _ss is not None:
-                        if _ss > 0.2: _sig_chips.append("📰新聞正面")
-                        elif _ss < -0.2: _sig_chips.append("📰新聞負面")
-                    if stock.get("momentum_score", 50) >= 70: _sig_chips.append("⚡動能強")
-                    if _sig_chips:
-                        st.caption("信號：" + "  ".join(_sig_chips))
+                    if _ss is not None and pd.notna(_ss):
+                        lbl = "🟢 正面" if _ss > 0.2 else "🔴 負面" if _ss < -0.2 else "🟡 中性"
+                        st.caption(f"新聞情緒：{lbl}（分數 {_ss:+.2f}）| "
+                                   + (" | ".join(
+                                       [f"🟢{k}" for k in ["外資買超", "投信買超"]
+                                        if (_fn > 0 and k == "外資買超") or (_tn > 0 and k == "投信買超")]
+                                   ) or ""))
 
                     note = st.session_state.notes.get(stock["ticker"], "")
                     if note:
-                        st.markdown("##### 📝 個人筆記")
-                        st.info(note[:100] + "..." if len(note) > 100 else note)
+                        st.caption(f"📝 筆記：{note[:80]}{'...' if len(note) > 80 else ''}")
+                    if stock.get("risk_score", 0) > 70:
+                        st.warning("⚠️ 風險提醒：此股波動較大，請控制部位，勿重押。")
 
-                    if stock["risk_score"] > 70:
-                        st.warning("⚠️ 風險提醒: 風險分數偏高，請注意波動")
+                    if st.button("🔍 查看完整個股分析", key=f"top10_goto_{stock['ticker']}"):
+                        st.session_state["goto_ticker"] = stock["ticker"]
+                        st.rerun()
 
             st.markdown("---")
-            csv_data = top10[["ticker", "name", "market", "group", "close",
-                               "prob5", "prob20", "prob60", "confidence",
-                               "expected_return_20d", "hit_rate", "risk_score",
-                               "candidate_level", "final_composite"]].to_csv(index=False).encode("utf-8-sig")
-            st.download_button("📥 下載 TOP 10 CSV", csv_data,
+            csv_cols = [c for c in ["ticker", "name", "market", "group", "close", "change_pct",
+                                    "volume", "risk_score", "candidate_level"] if c in top10.columns]
+            csv_data = top10[csv_cols].to_csv(index=False).encode("utf-8-sig")
+            st.download_button("📥 下載推薦清單 CSV", csv_data,
                                file_name=f"top10_{date.today()}.csv", mime="text/csv")
 
     # ========== Tab 1: 美股連動 ==========
@@ -1140,6 +1223,97 @@ def main():
 
             st.markdown("---")
 
+            # ── 宏觀環境儀表板 ──
+            st.markdown("### 🌐 宏觀經濟儀表板")
+            st.caption("資料來源：yfinance（WTI油價/美債/VIX/黃金/美元）｜1小時快取")
+            with st.spinner("載入宏觀指標..."):
+                macro_loader = MacroLoader()
+                macro_snap   = macro_loader.get_snapshot()
+                macro_impact = macro_loader.analyze_macro_impact(macro_snap)
+
+            if macro_snap:
+                mc_cols = st.columns(len(macro_snap))
+                for i, (name, d) in enumerate(macro_snap.items()):
+                    with mc_cols[i]:
+                        chg = d.get("chg_pct")
+                        chg_str = f"{chg:+.2f}%" if chg is not None else ""
+                        label_txt = d.get("label", name)
+                        unit_txt  = d.get("unit", "")
+                        price_txt = f"{d['price']:.2f}{' ' + unit_txt if unit_txt else ''}"
+                        st.metric(label_txt, price_txt, chg_str)
+
+                st.markdown(f"**整體判斷：{macro_impact['overall']}**")
+                for r in macro_impact.get("reasons", []):
+                    st.markdown(f"- {r}")
+
+                # 產業影響矩陣
+                si = macro_impact.get("sector_impact", {})
+                if si:
+                    st.markdown("**台股各產業宏觀影響：**")
+                    si_rows = [
+                        {"產業": sec, "影響": v[0], "說明": v[1]}
+                        for sec, v in si.items()
+                    ]
+                    st.dataframe(pd.DataFrame(si_rows), use_container_width=True, hide_index=True)
+            else:
+                st.info("⚠️ 無法取得宏觀指標（需安裝 yfinance）")
+
+            st.markdown("---")
+
+            # ── 大戶持股追蹤（SEC 13F）──
+            with st.expander("🏦 大型機構持股追蹤（SEC 13F，僅供參考）", expanded=False):
+                st.caption("13F 每季申報一次，有最長 45 天延遲。資料來源：SEC EDGAR（免費）。需安裝：`pip install edgartools`")
+                tracker = InstitutionalTracker()
+                if not tracker.has_edgar:
+                    st.warning(f"⚠️ 未安裝 edgartools，請執行：`{tracker.install_hint()}`")
+                else:
+                    fund_choice = st.selectbox("選擇機構", list(TRACKED_FUNDS.keys()),
+                                               key="fund_select_tab1")
+                    with st.spinner(f"載入 {fund_choice} 13F 持倉..."):
+                        holdings = tracker.get_holdings(fund_choice, top_n=20)
+                        filing_dt = tracker.get_filing_date(fund_choice)
+
+                    if holdings:
+                        if filing_dt:
+                            st.caption(f"最新申報日：{filing_dt}（截至當日持倉快照）")
+                        h_rows = []
+                        for h in holdings:
+                            val_b = h["value_usd"] / 1e6 if h["value_usd"] else None
+                            h_rows.append({
+                                "股票":   h["company"],
+                                "市值(百萬USD)": f"{val_b:.0f}" if val_b else "--",
+                                "持倉%":  f"{h['pct_portfolio']:.2f}%" if h["pct_portfolio"] else "--",
+                                "台股關聯": h["tw_related"] or "—",
+                            })
+                        h_df = pd.DataFrame(h_rows)
+                        st.dataframe(h_df, use_container_width=True, hide_index=True)
+
+                        # 台股相關持股特別標示
+                        tw_related = [h for h in holdings if h.get("tw_related")]
+                        if tw_related:
+                            st.markdown("**與台股相關持股：**")
+                            for h in tw_related:
+                                st.markdown(f"- **{h['company']}**：{h['tw_related']}")
+                    else:
+                        st.info("⚠️ 暫無 13F 資料（可能網路問題或 Edgar API 限速）")
+
+                    # 跨基金台股相關彙整
+                    st.markdown("**所有追蹤基金 × 台股相關持股彙整：**")
+                    with st.spinner("彙整所有基金台股相關持股..."):
+                        all_tw = tracker.get_tw_related_holdings()
+                    if all_tw:
+                        tw_df = pd.DataFrame([{
+                            "基金":  r["fund"],
+                            "股票":  r["company"],
+                            "台股關聯": r["tw_related"],
+                            "持倉%": f"{r['pct_portfolio']:.2f}%" if r["pct_portfolio"] else "--",
+                        } for r in all_tw])
+                        st.dataframe(tw_df, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("暫無台股相關持股資料")
+
+            st.markdown("---")
+
             # ── 供應鏈映射完整表 ──
             st.markdown("### 📋 美股 → 台股供應鏈完整對照表")
             for us_ticker, chain in US_TW_SUPPLY_CHAIN.items():
@@ -1189,61 +1363,114 @@ def main():
 
     # ========== Tab 2: 候選清單 ==========
     with tabs[2]:
-        st.subheader("候選清單")
+        st.subheader("📋 候選清單")
         if filtered_df.empty:
-            st.warning("⚠️ 目前篩選條件下沒有資料")
+            st.warning("⚠️ 目前篩選條件下沒有資料，請調整左側篩選條件")
         else:
-            column_mapping = {
-                "ticker": "代碼", "name": "名稱", "market": "市場",
-                "group": "產業分類", "industry": "細分產業",
-                "close": "收盤價", "change_pct": "漲跌幅(%)",
-                "prob5": "5日機率(%)", "prob20": "20日機率(%)", "prob60": "60日機率(%)",
-                "expected_return_20d": "期望報酬(%)", "confidence": "信心度(%)",
-                "hit_rate": "命中率(%)", "hit_rate_source": "資料來源",
-                "risk_score": "風險分數", "candidate_level": "候選等級",
-                "composite_score": "綜合評分",
-            }
-            cols = [c for c in DISPLAY_COLUMNS["候選清單"] if c in filtered_df.columns]
-            if "expected_return_20d" not in cols:
-                cols.insert(cols.index("confidence") if "confidence" in cols else -1, "expected_return_20d")
-            display_df = filtered_df[cols].copy().rename(columns=column_mapping)
-            # 加入信號欄
+            sc_note = f"（{sc_category}）" if sc_category != "全部產業" else ""
+            st.caption(f"共 {len(filtered_df)} 筆{sc_note}，依综合評估排序（籌碼+技術+基本面加權）。點選個股代碼可查看完整分析。")
+
+            # 固定顯示欄位（移除原始分數數字，改為信號摘要）
+            base_cols = ["ticker", "name", "group", "market", "close", "change_pct", "volume", "candidate_level"]
+            avail_base = [c for c in base_cols if c in filtered_df.columns]
+            display_df = filtered_df[avail_base].copy().rename(columns={
+                "ticker": "代碼", "name": "名稱", "group": "產業", "market": "市場",
+                "close": "收盤(元)", "change_pct": "漲跌%", "volume": "成交量(張)",
+                "candidate_level": "候選等級",
+            })
+
+            # 三面向信號欄
             def _sig_col(row):
+                t = row.get("代碼", "")
                 chips = []
-                t = row.get("代碼") or row.get("ticker", "")
+                # 籌碼
                 _inst = st.session_state.institutional_data.get("inst", {}).get(t, {})
                 fn = _inst.get("foreign_net", 0) or 0
                 tn = _inst.get("trust_net", 0) or 0
-                if fn > 0:  chips.append("🟢外資↑")
+                if fn > 0:   chips.append("🟢外資↑")
                 elif fn < 0: chips.append("🔴外資↓")
-                if tn > 0:  chips.append("🟢投信↑")
+                if tn > 0:   chips.append("🟢投信↑")
                 elif tn < 0: chips.append("🔴投信↓")
+                # 技術
+                _td = st.session_state.tech_data.get(t, {})
+                if _td:
+                    _rsi = _td.get("analysis", {}).get("rsi")
+                    _ml  = _td.get("indicators", {}).get("macd", [])
+                    _ms  = _td.get("indicators", {}).get("macd_signal", [])
+                    if _rsi and _rsi > 70: chips.append("🔥RSI超買")
+                    if _rsi and _rsi < 30: chips.append("❄️RSI超賣")
+                    if _ml and _ms:
+                        chips.append("⬆️MACD+" if _ml[-1] > _ms[-1] else "⬇️MACD-")
+                # 新聞
                 ss_v = filtered_df.loc[filtered_df["ticker"] == t, "sentiment_score"].values
                 if len(ss_v) and ss_v[0] is not None and pd.notna(ss_v[0]):
-                    if ss_v[0] > 0.2:  chips.append("📰+")
-                    elif ss_v[0] < -0.2: chips.append("📰-")
+                    if ss_v[0] > 0.2:   chips.append("📰正面")
+                    elif ss_v[0] < -0.2: chips.append("📰負面")
                 return " ".join(chips) if chips else "—"
-            display_df["信號"] = display_df.apply(_sig_col, axis=1)
-            st.dataframe(display_df, use_container_width=True, height=500)
-            csv_data = filtered_df[cols].to_csv(index=False).encode("utf-8-sig")
-            st.download_button("📥 下載CSV", csv_data,
+
+            # 基本面亮點欄
+            def _fund_col(row):
+                t = row.get("代碼", "")
+                _fd = st.session_state.stock_fundamentals.get(t) or \
+                      st.session_state.watchlist_data.get(t, {}).get("fundamental") or {}
+                parts = []
+                pe = _fd.get("pe")
+                gm = _fd.get("gross_margin")
+                yy = _fd.get("revenue_yoy")
+                if pe:  parts.append(f"PE:{pe:.0f}x")
+                if gm:  parts.append(f"毛利:{gm:.0f}%")
+                if yy is not None: parts.append(f"營收YoY:{yy:+.0f}%")
+                return "  ".join(parts) if parts else "—"
+
+            display_df["信號"]   = display_df.apply(_sig_col,  axis=1)
+            display_df["基本面"] = display_df.apply(_fund_col, axis=1)
+
+            st.dataframe(display_df, use_container_width=True, height=520)
+
+            # CSV 保留完整欄位方便匯出
+            csv_cols = [c for c in ["ticker", "name", "market", "group", "close", "change_pct",
+                                    "volume", "risk_score", "candidate_level", "momentum_score",
+                                    "flow_score", "quality_score"] if c in filtered_df.columns]
+            csv_data = filtered_df[csv_cols].to_csv(index=False).encode("utf-8-sig")
+            st.download_button("📥 下載CSV（含評分）", csv_data,
                                file_name=f"candidates_{date.today()}.csv", mime="text/csv")
 
     # ========== Tab 3: 個股分析 ==========
     with tabs[3]:
         st.subheader("個股分析")
-        if filtered_df.empty:
+        # 處理熱度排行/產業總覽的「完整分析」跳轉
+        _goto = st.session_state.pop("goto_ticker", None)
+
+        if filtered_df.empty and model_df.empty:
             st.warning("⚠️ 目前篩選條件下沒有資料")
         else:
+            # 若 goto_ticker 不在目前過濾清單，暫時用 model_df 全清單
+            _ticker_pool = (
+                model_df["ticker"].tolist() if not model_df.empty
+                else filtered_df["ticker"].tolist()
+            )
+            _filtered_pool = filtered_df["ticker"].tolist() if not filtered_df.empty else _ticker_pool
+
+            if _goto and _goto in _ticker_pool:
+                _default_pool = _ticker_pool if _goto not in _filtered_pool else _filtered_pool
+                _default_idx  = _default_pool.index(_goto)
+            else:
+                _default_pool = _filtered_pool
+                _default_idx  = 0
+
             selected_ticker = st.selectbox(
                 "選擇個股",
-                filtered_df["ticker"].tolist(),
+                _default_pool,
+                index=_default_idx,
                 format_func=lambda t: (
                     f"{t} {model_df.loc[model_df['ticker']==t, 'name'].iloc[0]}"
                     if not model_df[model_df["ticker"] == t].empty else t
                 ),
                 key="stock_selector",
             )
+            if model_df[model_df["ticker"] == selected_ticker].empty:
+                st.warning(f"⚠️ 找不到 {selected_ticker} 的資料，請重新選擇")
+                st.stop()
             stock = model_df[model_df["ticker"] == selected_ticker].iloc[0]
 
             # ── 標題與基本指標 ──
@@ -1271,76 +1498,65 @@ def main():
                         st.success("✅ 已加入追蹤，下次啟動自動載入基本面")
                         st.rerun()
 
-            mc1, mc2, mc3, mc4, mc5, mc6 = st.columns(6)
-            mc1.metric("📅 1週漲機率",  format_percentage(stock["prob5"]),
-                       help="未來5個交易日（約1週）股價上漲的可能性\n✅ >60% 模型看多　⚠️ <40% 模型看空")
-            mc2.metric("📅 1月漲機率", format_percentage(stock["prob20"]),
-                       help="未來20個交易日（約1個月）股價上漲的可能性\n✅ >60% 看多　➡️ 50% 中性　⚠️ <40% 看空\n（最重要的參考指標）")
-            mc3.metric("📅 3月漲機率", format_percentage(stock["prob60"]),
-                       help="未來60個交易日（約3個月）股價上漲的可能性\n適合長期投資人參考趨勢方向")
-            mc4.metric("🎯 預測可靠性", format_percentage(stock["confidence"]),
-                       help="模型對這次預測有多確定\n✅ >70% 較可靠　➡️ 50-70% 普通　⚠️ <50% 不確定，勿輕易跟進")
-            mc5.metric("📊 歷史準確率", format_percentage(stock["hit_rate"]), stock["hit_rate_source"],
-                       help="過去模型看多時，股票實際上漲的比例\n本機快照累積越多天，這個數字越準確")
-            mc6.metric("💰 預估1月報酬", f"{stock['expected_return_20d']:+.1f}%" if pd.notna(stock.get("expected_return_20d")) else "N/A",
-                       help="根據模型機率和股票波動率估算的預期報酬\n僅供參考，不保證實際獲利")
+            # ── 行情摘要橫幅（取代6個分數 metric）──
+            chg3 = stock.get("change_pct", 0) or 0
+            close3 = stock.get("close") or 0
+            vol3   = stock.get("volume", 0) or 0
+            h52 = stock.get("high_52w") or st.session_state.stock_fundamentals.get(selected_ticker, {}).get("high_52w")
+            l52 = stock.get("low_52w")  or st.session_state.stock_fundamentals.get(selected_ticker, {}).get("low_52w")
+            bm1, bm2, bm3, bm4, bm5 = st.columns(5)
+            bm1.metric("收盤價", f"NT${close3:,.0f}" if close3 else "--",
+                       delta=f"{chg3:+.2f}%", help="今日收盤價（元）")
+            bm2.metric("今日漲跌", f"{chg3:+.2f}%",
+                       help="今日漲跌幅。正值=上漲，負值=下跌。台股漲跌幅限制±10%。")
+            bm3.metric("成交量", f"{int(vol3):,} 張" if vol3 else "--",
+                       help="今日成交量（張=1,000股）。量大代表市場活躍；縮量下跌或放量上漲需關注。")
+            bm4.metric("52週高點", f"NT${h52:,.0f}" if h52 else "--",
+                       help="過去一年最高收盤價。若目前股價接近52週高點，代表強勢；遠低於高點需了解原因。")
+            bm5.metric("52週低點", f"NT${l52:,.0f}" if l52 else "--",
+                       help="過去一年最低收盤價。若股價接近52週低點，需確認是否有基本面問題。")
 
-            # ── 指標白話速查 ──
-            with st.expander("📖 看不懂這些數字？點這裡看白話說明"):
-                st.markdown("""
-| 指標 | 意思 | 怎麼看 |
-|------|------|--------|
-| **1週/1月/3月漲機率** | 模型預測未來這段時間股價上漲的可能性 | >60% 偏多、50% 中性、<40% 偏空 |
-| **預測可靠性** | 模型對這次預測有多確定 | >70% 較可信、<50% 參考就好 |
-| **歷史準確率** | 過去模型看多時實際上漲的比例 | 快照越多天越準確，初期為估算值 |
-| **預估1月報酬** | 根據波動率算出的預期獲利 | 僅為統計估算，不保證 |
-| **近期漲勢（動能）** | 股價最近是否有往上走的慣性 | 分數越高代表近期走勢越強 |
-| **成長速度** | 公司營收和獲利是否持續增加 | 有真實財報才準確，否則為估算 |
-| **獲利品質** | 毛利率、淨利率高不高 | 越高代表公司賺錢能力越強 |
-| **股價便宜程度（價值）** | 目前股價相對獲利是貴還是便宜 | 分數越高代表相對便宜 |
-| **大戶動向（籌碼）** | 外資、投信等大型機構在買還是在賣 | 分數越高代表大戶在買 |
-| **股價穩定度** | 這檔股票容不容易大幅波動 | 分數越高代表越穩定 |
-                """)
-                st.caption("⚠️ 以上指標均為統計模型輸出，不構成投資建議。實際操作前請自行評估風險。")
+            # ── 整體信號判斷橫幅 ──────────────────────────────────
+            _sig_count_pos = _sig_count_neg = 0
+            _inst3 = st.session_state.institutional_data.get("inst", {}).get(selected_ticker, {})
+            if (_inst3.get("foreign_net") or 0) > 0: _sig_count_pos += 1
+            else: _sig_count_neg += 1
+            if (_inst3.get("trust_net") or 0) > 0: _sig_count_pos += 1
+            else: _sig_count_neg += 1
+            _td3 = st.session_state.tech_data.get(selected_ticker, {})
+            _ana3 = _td3.get("analysis", {}) if _td3 else {}
+            _rsi3 = _ana3.get("rsi")
+            _ml3  = _td3.get("indicators", {}).get("macd", []) if _td3 else []
+            _ms3  = _td3.get("indicators", {}).get("macd_signal", []) if _td3 else []
+            if _rsi3 and 30 < _rsi3 < 70: _sig_count_pos += 1
+            elif _rsi3: _sig_count_neg += 1
+            if _ml3 and _ms3:
+                if _ml3[-1] > _ms3[-1]: _sig_count_pos += 1
+                else: _sig_count_neg += 1
+            _ss3 = stock.get("sentiment_score")
+            if _ss3 is not None and pd.notna(_ss3):
+                if _ss3 > 0.1: _sig_count_pos += 1
+                elif _ss3 < -0.1: _sig_count_neg += 1
 
-            # ── 圖表區 ──
-            ch1, ch2 = st.columns(2)
-            with ch1:
-                fig = go.Figure()
-                fig.add_trace(go.Scatterpolar(
-                    r=[stock[f] for f in ["momentum_score", "growth_score", "quality_score",
-                                          "value_score", "flow_score", "low_vol_score"]],
-                    theta=list(WEIGHT_LABELS.values()),
-                    fill="toself", name="因子分數", line_color="rgb(99,110,250)",
-                ))
-                fig.update_layout(
-                    title="六因子雷達圖",
-                    polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-                    showlegend=False, height=350,
-                )
-                st.plotly_chart(fig, use_container_width=True)
-
-            with ch2:
-                st.markdown("**📋 數據載入狀態**")
-                has_fund = stock.get("has_real_fund", False)
-                has_flow = stock.get("has_real_flow", False)
-                has_snap = stock.get("m20") is not None
-                path     = stock.get("scoring_path", "技術動能")
-
-                st.write("✅ 基本面已載入" if has_fund else "⚠️ 基本面：未載入（點下方按鈕）")
-                st.write("✅ 法人/籌碼已載入" if has_flow else "⚠️ 法人資料：未載入（側邊欄載入市場）")
-                st.write("✅ 技術快照充足" if has_snap else "⚠️ 技術快照不足（累積快照後更準）")
-                st.write(f"📈 評分模式：{'完整六因子' if path == '完整' else '技術動能路徑'}")
-
-                st.markdown("---")
-                if not has_fund and not has_flow:
-                    st.warning("⚠️ **數據不足**：目前機率與評分為估算值，分數僅供參考。\n\n載入基本面資料後準確度會大幅提升。")
-                elif not has_fund:
-                    st.info("💡 載入基本面後，估值與獲利品質評分會更準確。")
-                elif not has_flow:
-                    st.info("💡 載入三大法人資料後，籌碼評分會更準確。")
+            _total3 = _sig_count_pos + _sig_count_neg
+            if _total3 > 0:
+                if _sig_count_pos >= _total3 * 0.7:
+                    st.success(f"🟢 **多方傾向**（{_sig_count_pos}/{_total3} 項指標偏多）— 謹慎樂觀，注意進出場時機")
+                elif _sig_count_neg >= _total3 * 0.7:
+                    st.error(f"🔴 **空方傾向**（{_sig_count_neg}/{_total3} 項指標偏空）— 保守觀望，留意下行風險")
                 else:
-                    st.success("✅ 數據完整，評分具有參考價值。")
+                    st.info(f"🟡 **多空分歧**（{_sig_count_pos} 多 / {_sig_count_neg} 空）— 方向不明，等待更清晰信號")
+            st.caption("⚠️ 信號判斷為統計模型評估，不構成投資建議。操作前請自行評估風險與部位。")
+
+            # ── 數據載入狀態（精簡版）──────────────────────────────
+            has_fund = stock.get("has_real_fund", False)
+            has_flow = stock.get("has_real_flow", False)
+            _status_tags = []
+            if has_fund: _status_tags.append("✅ 基本面")
+            else:        _status_tags.append("⚠️ 基本面(估算)")
+            if has_flow: _status_tags.append("✅ 法人籌碼")
+            else:        _status_tags.append("⚠️ 籌碼(估算)")
+            st.caption("資料狀態：" + " | ".join(_status_tags))
 
             # ── 基本面 ──
             st.markdown("---")
@@ -1434,6 +1650,65 @@ def main():
                     st.markdown("**📋 基本面摘要**")
                     st.markdown("\n".join(summary_parts))
                     st.caption("⚠️ 以上為歷史財務數據，僅供研究參考，不構成投資建議。")
+
+                # ── YTP 三率趨勢 + 歷史分位數 ──
+                st.markdown("---")
+                st.markdown("#### 📊 PE／PB／殖利率歷史分位數（估值高低估判斷）")
+                with st.spinner("載入 YTP 三率趨勢..."):
+                    fm_val = FinMindLoader(token=st.session_state.get("finmind_token", ""))
+                    per_trend = fm_val.get_per_trend(selected_ticker, months=36)
+                    val_pct   = fm_val.get_valuation_percentile(selected_ticker)
+
+                if per_trend:
+                    per_df = pd.DataFrame(per_trend)
+                    fig_per = go.Figure()
+                    if per_df["pe"].notna().any():
+                        fig_per.add_scatter(x=per_df["date"], y=per_df["pe"],
+                                            name="本益比(PE)", line=dict(color="royalblue", width=2))
+                    if per_df["pb"].notna().any():
+                        fig_per.add_scatter(x=per_df["date"], y=per_df["pb"],
+                                            name="本淨比(PB)", yaxis="y2",
+                                            line=dict(color="orange", width=2, dash="dot"))
+                    if per_df["dy"].notna().any():
+                        fig_per.add_scatter(x=per_df["date"], y=per_df["dy"],
+                                            name="殖利率%", yaxis="y3",
+                                            line=dict(color="green", width=2, dash="dash"))
+                    fig_per.update_layout(
+                        title="PE / PB / 殖利率 近36個月趨勢",
+                        height=320, margin=dict(t=40, b=20),
+                        yaxis=dict(title="PE", side="left"),
+                        yaxis2=dict(title="PB", overlaying="y", side="right", showgrid=False),
+                        yaxis3=dict(title="殖利率%", overlaying="y", side="right",
+                                    anchor="free", position=1.0, showgrid=False),
+                        legend=dict(orientation="h", y=-0.2),
+                    )
+                    st.plotly_chart(fig_per, use_container_width=True)
+                else:
+                    st.info("⚠️ 無 PE/PB/殖利率歷史資料（需 FinMind 有效 token）")
+
+                # 分位數橫條
+                st.markdown(f"**估值判斷：{val_pct.get('status', '--')}**")
+                st.caption(val_pct.get("suggestion", ""))
+                pct_cols = st.columns(3)
+                for col, (label, key, curr_key, low_good) in zip(pct_cols, [
+                    ("本益比 PE",  "pe_pct",  "pe_curr",  True),
+                    ("本淨比 PB",  "pb_pct",  "pb_curr",  True),
+                    ("殖利率 DY",  "dy_pct",  "dy_curr",  False),
+                ]):
+                    with col:
+                        pct  = val_pct.get(key)
+                        curr = val_pct.get(curr_key)
+                        curr_str = f"{curr:.1f}" if curr is not None else "--"
+                        if pct is not None:
+                            bar_color = (
+                                "🟢" if (low_good and pct < 30) or (not low_good and pct < 30)
+                                else "🔴" if (low_good and pct > 70) or (not low_good and pct > 70)
+                                else "🟡"
+                            )
+                            st.metric(label, curr_str, f"歷史 {pct:.0f}% 分位")
+                            st.progress(int(pct) / 100, text=f"{bar_color} {'低估' if pct < 30 else '高估' if pct > 70 else '合理'}")
+                        else:
+                            st.metric(label, curr_str, "分位資料不足")
 
             # ── 籌碼 ──
             st.markdown("---")
