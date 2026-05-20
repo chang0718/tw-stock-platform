@@ -1843,7 +1843,7 @@ def main():
         if model_df.empty:
             st.warning("⚠️ 請先載入市場資料")
         else:
-            heat_df = model.calculate_industry_heat(model_df, SUPPLY_CHAIN_GROUPS)
+            heat_df = QuantModel(st.session_state.weights).calculate_industry_heat(model_df, SUPPLY_CHAIN_GROUPS)
             if heat_df.empty:
                 st.info("載入全市場資料後，熱度指數將自動計算。")
             else:
