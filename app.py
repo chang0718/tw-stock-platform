@@ -1219,7 +1219,7 @@ def main():
                 if tn > 0:  chips.append("🟢投信↑")
                 elif tn < 0: chips.append("🔴投信↓")
                 ss_v = filtered_df.loc[filtered_df["ticker"] == t, "sentiment_score"].values
-                if len(ss_v) and ss_v[0] is not None:
+                if len(ss_v) and ss_v[0] is not None and pd.notna(ss_v[0]):
                     if ss_v[0] > 0.2:  chips.append("📰+")
                     elif ss_v[0] < -0.2: chips.append("📰-")
                 return " ".join(chips) if chips else "—"
@@ -1344,27 +1344,23 @@ def main():
 
             # ── 基本面 ──
             st.markdown("---")
-            st.markdown("#### 📊 基本面（FinMind API）")
+            st.markdown("#### 📊 基本面（Yahoo Finance 主力 / FinMind 補月營收）")
 
             fund_key = selected_ticker
             if fund_key in st.session_state.stock_fundamentals:
                 render_fundamental_block(st.session_state.stock_fundamentals[fund_key])
-            elif selected_ticker in st.session_state.watchlist_data:
+            elif selected_ticker in st.session_state.watchlist_data and \
+                    st.session_state.watchlist_data[selected_ticker].get("fundamental"):
                 render_fundamental_block(
                     st.session_state.watchlist_data[selected_ticker].get("fundamental", {})
                 )
             else:
-                col_btn, _ = st.columns([2, 3])
-                with col_btn:
-                    if st.button("📊 載入基本面資料", use_container_width=True,
-                                 key=f"load_fm_{selected_ticker}"):
-                        with st.spinner("向 FinMind 請求資料..."):
-                            fm = FinMindLoader(token=st.session_state.get("finmind_token", ""))
-                            fdata = fm.get_fundamental(selected_ticker)
-                            st.session_state.stock_fundamentals[selected_ticker] = fdata
-                            st.session_state.model_cache_key = ""  # 觸發重算
-                        st.rerun()
-                st.info("⚠️ 尚未載入基本面（或加入追蹤，下次啟動自動載入）")
+                with st.spinner("📊 自動載入基本面（Yahoo Finance）..."):
+                    fm = FinMindLoader(token=st.session_state.get("finmind_token", ""))
+                    fdata = fm.get_fundamental(selected_ticker)
+                    st.session_state.stock_fundamentals[selected_ticker] = fdata
+                    st.session_state.model_cache_key = ""
+                render_fundamental_block(fdata)
 
             # ── 月/季趨勢 ──
             if selected_ticker in st.session_state.stock_fundamentals:
@@ -1453,37 +1449,31 @@ def main():
                     st.session_state.tech_data.pop(selected_ticker, None)
                     st.rerun()
             else:
-                col_tb, _ = st.columns([2, 3])
-                with col_tb:
-                    if st.button("📈 載入技術分析", use_container_width=True,
-                                 key=f"load_tech_{selected_ticker}"):
-                        with st.spinner("載入歷史 K 線資料..."):
-                            fm = FinMindLoader(token=st.session_state.get("finmind_token", ""))
-                            price_df = fm.get_price_history(selected_ticker, days=120)
-                            ta = tech_analyze(price_df, selected_ticker, stock["name"])
-                            st.session_state.tech_data[selected_ticker] = ta
-                        st.rerun()
-                st.info("⚠️ 點擊上方按鈕載入 120 日歷史 K 線與技術指標（需 FinMind token）")
+                with st.spinner("📈 自動載入技術分析（120日K線）..."):
+                    fm = FinMindLoader(token=st.session_state.get("finmind_token", ""))
+                    price_df = fm.get_price_history(selected_ticker, days=120)
+                    ta = tech_analyze(price_df, selected_ticker, stock["name"])
+                    st.session_state.tech_data[selected_ticker] = ta
+                if ta:
+                    render_tech_block(ta, stock.to_dict())
+                else:
+                    st.warning("⚠️ 無法取得歷史 K 線資料（可能為上櫃新股或 API 暫無數據）")
 
             # ── 新聞情緒 ──
             st.markdown("---")
             st.markdown("#### 📰 新聞情緒（RSS，近 7 天）")
             news_key = selected_ticker
-            if news_key in st.session_state.watchlist_data:
+            if news_key in st.session_state.watchlist_data and \
+                    st.session_state.watchlist_data[news_key].get("news"):
                 render_news_block(st.session_state.watchlist_data[news_key].get("news", {}))
             else:
-                col_btn2, _ = st.columns([2, 3])
-                with col_btn2:
-                    if st.button("📰 載入新聞分析", use_container_width=True,
-                                 key=f"load_news_{selected_ticker}"):
-                        with st.spinner("爬取 RSS 新聞..."):
-                            na = NewsAnalyzer()
-                            nd = na.get_stock_news_sentiment(selected_ticker, stock["name"])
-                            if selected_ticker not in st.session_state.watchlist_data:
-                                st.session_state.watchlist_data[selected_ticker] = {}
-                            st.session_state.watchlist_data[selected_ticker]["news"] = nd
-                        st.rerun()
-                st.info("⚠️ 尚未載入新聞（或加入追蹤，下次啟動自動載入）")
+                with st.spinner("📰 自動載入新聞情緒（RSS）..."):
+                    na = NewsAnalyzer()
+                    nd = na.get_stock_news_sentiment(selected_ticker, stock["name"])
+                    if selected_ticker not in st.session_state.watchlist_data:
+                        st.session_state.watchlist_data[selected_ticker] = {}
+                    st.session_state.watchlist_data[selected_ticker]["news"] = nd
+                render_news_block(nd)
 
             # ── 個人筆記 ──
             st.markdown("---")
@@ -1524,36 +1514,50 @@ def main():
 
                 # 籌碼動向
                 st.markdown("**三大法人今日淨買賣（千股）**")
+                st.caption("正值=買超、負值=賣超。外資長線影響最大；投信買超通常帶動短中期動能；自營商多為短線避險。")
                 ci1, ci2, ci3 = st.columns(3)
                 fn_v = int(_inst_row.get("foreign_net", 0) or 0)
                 tn_v = int(_inst_row.get("trust_net",   0) or 0)
                 dn_v = int(_inst_row.get("dealer_net",  0) or 0)
-                ci1.metric("外資", f"{fn_v:+,}", delta_color="normal" if fn_v >= 0 else "inverse")
-                ci2.metric("投信", f"{tn_v:+,}", delta_color="normal" if tn_v >= 0 else "inverse")
-                ci3.metric("自營商", f"{dn_v:+,}", delta_color="normal" if dn_v >= 0 else "inverse")
+                ci1.metric("外資", f"{fn_v:+,}", help="外資今日淨買超（正=買超/負=賣超），單位千股。外資連續買超通常是多頭訊號。")
+                ci2.metric("投信", f"{tn_v:+,}", help="投信（國內基金）今日淨買超，持續買超常帶動短中期行情。")
+                ci3.metric("自營商", f"{dn_v:+,}", help="自營商今日淨買超，多為短線避險操作，參考性較低。")
 
                 # 融資融券
                 if _marg_row:
-                    st.markdown("**融資融券**")
+                    st.markdown("**融資融券（張）**")
+                    st.caption("融資增加=散戶用槓桿買進（過熱警訊）；融券增加=放空張數增加（可能有軋空行情）。")
                     mr1, mr2, mr3, mr4 = st.columns(4)
-                    mr1.metric("融資餘額",   f"{int(_marg_row.get('margin_balance', 0) or 0):,}")
-                    mr2.metric("融資變化",   f"{int(_marg_row.get('margin_change',  0) or 0):+,}")
-                    mr3.metric("融券餘額",   f"{int(_marg_row.get('short_balance',  0) or 0):,}")
-                    mr4.metric("融券變化",   f"{int(_marg_row.get('short_change',   0) or 0):+,}")
+                    mr1.metric("融資餘額", f"{int(_marg_row.get('margin_balance', 0) or 0):,}",
+                               help="目前融資未還清張數。餘額過高代表市場過熱，下跌時容易引發斷頭賣壓。")
+                    mr2.metric("融資變化", f"{int(_marg_row.get('margin_change',  0) or 0):+,}",
+                               help="今日融資增減張數。連續增加需注意籌碼過熱風險。")
+                    mr3.metric("融券餘額", f"{int(_marg_row.get('short_balance',  0) or 0):,}",
+                               help="目前空單未回補張數。融券大增代表空方看壞；若空頭回補則可能軋空上漲。")
+                    mr4.metric("融券變化", f"{int(_marg_row.get('short_change',   0) or 0):+,}",
+                               help="今日融券增減張數。大量回補（負值）可能帶動股價上漲。")
 
                 # 技術信號
                 _td = st.session_state.tech_data.get(selected_ticker, {})
-                if _td:
+                if _td and isinstance(_td, dict):
                     st.markdown("**技術信號**")
-                    rsi_v = _td.get("rsi")
-                    macd_v = _td.get("macd")
-                    macd_sig = _td.get("macd_signal")
+                    _analysis = _td.get("analysis", {})
+                    _indicators = _td.get("indicators", {})
+                    rsi_v = _analysis.get("rsi")
+                    macd_list = _indicators.get("macd", [])
+                    macd_sig_list = _indicators.get("macd_signal", [])
+                    macd_v = macd_list[-1] if macd_list else None
+                    macd_sig = macd_sig_list[-1] if macd_sig_list else None
                     if rsi_v is not None:
                         rsi_lbl = "🔥 超買(>70)" if rsi_v > 70 else ("❄️ 超賣(<30)" if rsi_v < 30 else "正常區間")
-                        st.write(f"RSI(14)：**{rsi_v:.1f}** — {rsi_lbl}")
+                        st.write(f"RSI(14)：**{rsi_v:.1f}** — {rsi_lbl}（RSI 衡量近期漲跌強度，>70 過熱，<30 過冷）")
                     if macd_v is not None and macd_sig is not None:
                         cross = "⬆️ 金叉（多頭）" if macd_v > macd_sig else "⬇️ 死叉（空頭）"
-                        st.write(f"MACD：{cross}")
+                        st.write(f"MACD：{cross}（MACD 金叉代表短均線上穿長均線，為買入信號；死叉相反）")
+                    # 其他技術信號列表
+                    tech_signals = _analysis.get("signals", [])
+                    if tech_signals:
+                        st.caption("其他信號：" + " | ".join(tech_signals[:4]))
 
                 # 最新媒體報導
                 news_list = _news_d.get("news", []) if isinstance(_news_d, dict) else []
@@ -1877,19 +1881,24 @@ def main():
                     paper_bgcolor="rgba(0,0,0,0)",
                 )
                 st.plotly_chart(fig_heat, use_container_width=True)
+                st.caption("熱度指數越高代表市場資金與注意力越集中於該產業。分數僅反映當日籌碼與技術狀態，不代表未來走勢，請勿作為單一買賣依據。")
 
                 # ── 熱度分解表 ───────────────────────────────────────
                 st.markdown("#### 📋 熱度分解明細")
+                st.caption(
+                    "🔥熱度 = 籌碼35% + 技術35% + 新聞20% + 漲跌10%，均為0–100分。"
+                    "籌碼：外資+投信×2+自營加總；技術：動能分；新聞：情緒分；漲跌：近日漲跌幅換算。"
+                )
                 heat_display = heat_df.rename(columns={
                     "group": "產業/概念",
-                    "heat_index": "🔥熱度",
-                    "inst_score": "籌碼",
-                    "tech_score": "技術",
-                    "news_score": "新聞",
-                    "price_score": "漲跌",
-                    "stock_count": "股票數",
-                    "avg_change": "均漲%",
-                    "top_gainers": "代表股",
+                    "heat_index": "🔥熱度(0-100)",
+                    "inst_score": "籌碼分",
+                    "tech_score": "技術分",
+                    "news_score": "新聞分",
+                    "price_score": "漲跌分",
+                    "stock_count": "成分股數",
+                    "avg_change": "均漲跌%",
+                    "top_gainers": "漲幅前3股",
                 })
                 st.dataframe(heat_display, use_container_width=True, height=400)
 
@@ -1947,11 +1956,15 @@ def main():
                             srow = grp_df[grp_df["ticker"] == sel_ticker_heat].iloc[0]
                             with st.expander(f"📡 {sel_ticker_heat} 信號摘要", expanded=True):
                                 m1, m2, m3, m4 = st.columns(4)
-                                m1.metric("收盤", f"{srow.get('close', '-')}")
+                                m1.metric("收盤", f"{srow.get('close', '-')}",
+                                          help="今日收盤價（元）")
                                 chg = srow.get("change_pct", 0) or 0
-                                m2.metric("漲跌%", f"{chg:+.2f}%", delta=f"{chg:+.2f}%")
-                                m3.metric("外資淨(千股)", f"{int(srow.get('foreign_net', 0) or 0):+,}")
-                                m4.metric("20日機率", f"{srow.get('prob20', '-')}%")
+                                m2.metric("漲跌%", f"{chg:+.2f}%", delta=f"{chg:+.2f}%",
+                                          help="今日漲跌幅（%）。正值=上漲，負值=下跌。")
+                                m3.metric("外資淨(千股)", f"{int(srow.get('foreign_net', 0) or 0):+,}",
+                                          help="外資今日淨買超（正=買超/負=賣超），單位千股。")
+                                m4.metric("20日機率", f"{srow.get('prob20', '-')}%",
+                                          help="模型預測未來20個交易日上漲機率，50%以上偏多，60%以上為強多訊號。")
 
                                 c_inst, c_tech, c_news = st.columns(3)
                                 with c_inst:
@@ -1967,10 +1980,10 @@ def main():
                                     st.markdown("**技術信號**")
                                     ms = srow.get("momentum_score", 50) or 50
                                     lv = srow.get("low_vol_score", 50) or 50
-                                    st.write(f"動能分：{ms:.0f} {'🔥' if ms >= 70 else '❄️' if ms <= 30 else '➡️'}")
-                                    st.write(f"低波動分：{lv:.0f}")
+                                    st.write(f"動能分：{ms:.0f} {'🔥 強勢' if ms >= 70 else '❄️ 弱勢' if ms <= 30 else '➡️ 中性'}")
+                                    st.write(f"低波動分：{lv:.0f}（越高代表波動越低，適合穩健型持有）")
                                     td = st.session_state.get("tech_data", {}).get(sel_ticker_heat, {})
-                                    rsi = td.get("rsi")
+                                    rsi = td.get("analysis", {}).get("rsi") if td else None
                                     if rsi:
                                         st.write(f"RSI(14)：{rsi:.1f} {'🔥超買' if rsi > 70 else '❄️超賣' if rsi < 30 else '正常'}")
 
