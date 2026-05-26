@@ -1,5 +1,6 @@
 # 台股分析平台 — 對話交接文件
 
+> 最後更新：2026-05-26（Phase A-G 全面優化完成）
 > 建立時間：2026-05-12  
 > 用途：新對話繼續開發時的完整上下文
 
@@ -18,6 +19,52 @@
 | 本機啟動 | 終端執行 `.\run.ps1`，或先 `.\.venv\Scripts\Activate.ps1` 再 `streamlit run app.py` |
 | 本機網址 | http://localhost:8501 |
 | 手機（同WiFi）| http://172.20.10.9:8501 |
+
+---
+
+## 零、本輪（2026-05-26）最新完成功能（尚未 git commit）
+
+### 新增 Tab
+
+| Tab | 功能 | 核心邏輯 |
+|-----|------|---------|
+| tabs[9] 🎯 潛力股 | 落後補漲候選排行 | `quant_model.find_catchup_candidates()` — peer_lag_score × 0.35 + flow_score × 0.30 + KD/MACD × 0.20 + inst_entry × 0.15 |
+| tabs[10] 📈 ETF 排行 | ETF 月/季/年報酬率排行 | `finmind_loader.get_etf_performance()` |
+| tabs[7] 📊 產業瀏覽器 | 重構為左右兩欄 | 左=供應鏈樹+概念股按鈕，右=儀表板+股票表+產業新聞 |
+
+### Tab 0 — 新增「📡 本週市場熱點話題」expander
+
+- `config.NEWS_TO_SUPPLY_CHAIN`（12 個話題→供應鏈族群映射）
+- `news_analyzer.get_hot_topics()`（快取 2 小時）自動識別熱點話題並顯示受益族群
+
+### Tab 3 — 個股分析強化
+
+- **估值區間卡片**：`finmind_loader.get_eps_fair_value()` 顯示保守/合理/樂觀目標價（歷史 PE 25/50/75 分位 × trailing EPS）
+- **操作四區間說明**：整合技術面 S/R + PE 分位 + EPS 公平價，顯示積極買進/分批介入/觀望持有/逢高出清四區間附中文理由
+
+### 新增技術指標
+
+- `tech_analyzer.calc_kd()` — KD 指標（FastRSV→K→D）
+- `analyze()` 輸出新增 `kd_cross`、`k_val`、`d_val`
+
+### 新增評分維度（`quant_model.enrich_dataframe()`）
+
+- `peer_lag_score` — 族群平均動能 vs 個股動能差（越大越落後，補漲潛力越高）
+- `inst_entry` — 外資淨買入但 flow_score < 60（籌碼面剛開始建倉）
+- `macd_pre_cross` — MACD 柱狀圖負值收斂（黃金交叉前兆）
+
+### ⚠️ 重要開發規則（本輪兩次 bug 的教訓）
+
+**禁止在函式內部寫 `from X import Y`（尤其是 `main()` 內的 try 塊）**
+
+原因：Python 函式作用域規則讓整個 `main()` 把該名稱視為局部變數，早於 import 的呼叫會觸發 `UnboundLocalError`。
+
+驗證三步驟（每次修改後必跑）：
+```powershell
+python -m py_compile app.py && echo "語法 OK"
+python -m pytest tests/ -q              # 應為 57 passed
+grep -n "^from\|^import" app.py | head  # 確認無函式內 import
+```
 
 ---
 
@@ -72,7 +119,7 @@
 
 ### 🔴 高優先（影響使用體驗）
 
-1. **合併三個 PR 並整合測試**（見下方「五、整合測試步驟」）
+1. **git commit 尚未提交的 6 個檔案**：`app.py`, `config.py`, `finmind_loader.py`, `news_analyzer.py`, `quant_model.py`, `tech_analyzer.py`（共 +812/-324 行）
 
 2. **收盤價仍可能為 N/A**
    - TWSE API 偶爾在非交易日或剛開盤時回傳空行情
@@ -96,7 +143,11 @@
 
 6. **模型水泥股問題**：TOP5 仍可能被無基本面小股票佔據，需調整評分權重
 
-7. **Streamlit Cloud 資料持久化**：自選股、持倉在雲端重啟後消失，需外部儲存（Google Sheets、Supabase 等）
+7. **KD 批次計算限制**：`enrich_dataframe()` 中 `kd_cross` 預設 False，因為 `price_history` 只有 close（無 OHLCV）。真實 KD 只在 Tab 3 個股分析時計算。
+
+8. **Tab 3 估值卡片**：目前用 trailing EPS，未來可加入分析師 forward EPS 估算
+
+9. **Streamlit Cloud 資料持久化**：自選股、持倉在雲端重啟後消失，需外部儲存（Google Sheets、Supabase 等）
 
    **自選股儲存說明**：
    - **本機執行**：`tw_quant_data/watchlist.json` 持久存在磁碟，關閉平台後資料仍在
@@ -112,14 +163,16 @@
 
 | 檔案 | 說明 |
 |------|------|
-| `app.py` | 主程式（1900+ 行），所有 UI 邏輯 |
+| `app.py` | 主程式（~2900 行），11-Tab UI 邏輯 |
 | `quant_model.py` | 六因子量化模型（跨截面 Z-score） |
 | `data_loader.py` | TWSE / TPEx 市場資料載入 |
 | `finmind_loader.py` | FinMind API + yfinance 基本面（含 7 天快取） |
 | `twse_institutional.py` | 三大法人、融資融券 |
 | `signal_engine.py` | 買賣訊號生成 |
 | `portfolio.py` | 持倉管理 |
-| `config.py` | 全域設定（因子權重、顯示欄位） |
+| `tech_analyzer.py` | 技術指標（MA/RSI/MACD/KD/Bollinger/ATR/Fibonacci）|
+| `news_analyzer.py` | 新聞爬取、情緒分析、熱點話題 |
+| `config.py` | 供應鏈樹、概念股、ETF 清單、NEWS_TO_SUPPLY_CHAIN 映射 |
 | `tw_quant_data/` | 個人資料（持倉、自選股、快照、歷史價格） |
 | `.streamlit/secrets.toml` | 本機敏感設定（密碼、token）— 不上傳 GitHub |
 | `run.ps1` | PowerShell 啟動腳本 |

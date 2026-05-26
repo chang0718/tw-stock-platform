@@ -16,7 +16,7 @@ v3.0 真實數據版
 import hashlib
 import time
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List
 
 import numpy as np
@@ -32,7 +32,6 @@ from config import (
     DEFAULT_WEIGHTS,
     DISPLAY_COLUMNS,
     NOTES_FILE,
-    SNAPSHOT_FILE,
     WATCHLIST_FILE,
     WEIGHT_LABELS,
     WEIGHTS_FILE,
@@ -40,7 +39,6 @@ from config import (
 from utils import format_percentage, read_json, write_json
 from data_loader import MarketDataLoader
 from quant_model import QuantModel
-from backtest import BacktestEngine
 from finmind_loader import FinMindLoader
 from twse_institutional import TWSeInstitutionalLoader
 from news_analyzer import NewsAnalyzer
@@ -100,7 +98,6 @@ def initialize_session_state():
         "notes":             read_json(NOTES_FILE, {}),
         "last_update":       None,
         "data_date":         "",
-        "snapshots":         read_json(SNAPSHOT_FILE, []),
         # 追蹤清單：{ticker: {name, added_date}}
         "watchlist":         read_json(WATCHLIST_FILE, {}),
         "watchlist_data":    {},   # {ticker: {fundamental, news, name}}
@@ -365,7 +362,6 @@ def render_sidebar(universe_df: pd.DataFrame) -> Dict:
         "60日上漲機率": "prob60",
         "期望報酬率":   "expected_return_20d",
         "模型信心度":   "confidence",
-        "歷史命中率":   "hit_rate",
         "風險分數":    "risk_score",
         "成交量":      "volume",
     }
@@ -425,7 +421,7 @@ def render_sidebar(universe_df: pd.DataFrame) -> Dict:
         f"股票池: {len(universe_df)} 檔\n\n"
         f"法人資料: {inst_count} 檔\n\n"
         f"追蹤清單: {wl_count} 檔\n\n"
-        f"快照數: {len(st.session_state.snapshots)} 天"
+        f"資料更新: {st.session_state.get('data_date', '--')}"
     )
 
     if st.sidebar.checkbox("🔧 顯示除錯資訊", value=False):
@@ -445,24 +441,6 @@ def render_sidebar(universe_df: pd.DataFrame) -> Dict:
 # 快照
 # ============================================================
 
-def save_snapshot_action(model_df: pd.DataFrame):
-    if model_df.empty:
-        st.warning("⚠️ 沒有資料可保存")
-        return
-    today    = date.today().isoformat()
-    snap_rows = model_df[["ticker", "name", "close", "prob5", "prob20", "prob60", "confidence", "risk_score"]].to_dict("records")
-    snapshots = [s for s in st.session_state.snapshots if s.get("date") != today]
-    snapshots.append({"date": today, "rows": snap_rows})
-    snapshots = snapshots[-120:]
-    write_json(SNAPSHOT_FILE, snapshots)
-    st.session_state.snapshots = snapshots
-    st.success(f"✅ 已保存 {today} 快照（累積 {len(snapshots)} 天）")
-
-
-def clear_snapshots_action():
-    write_json(SNAPSHOT_FILE, [])
-    st.session_state.snapshots = []
-    st.warning("🗑️ 已清除所有快照")
 
 
 # ============================================================
@@ -855,7 +833,6 @@ def main():
         1. 點擊側邊欄 **🔄 載入上市** 或 **🌐 載入全市場**
         2. 調整 **⚖️ 因子權重** 和 **⭐ 特別關注產業**
         3. 在 **🔍 個股分析** 加入追蹤，自動載入基本面
-        4. 點擊 **💾 保存今日快照** 累積歷史資料
 
         ### 資料來源（全部免費）
         - 股價: TWSE / TPEx OpenAPI
@@ -873,8 +850,27 @@ def main():
     # 自動載入追蹤清單基本面
     load_watchlist_data()
 
+    # ── 盤後自動更新提示（台灣時間 15:30 後）─────────────────────
+    _now_tw = datetime.now(timezone(timedelta(hours=8)))
+    _data_date = st.session_state.get("data_date", "")
+    _today_str = _now_tw.strftime("%Y-%m-%d")
+    if (
+        _data_date
+        and _data_date < _today_str
+        and _now_tw.hour >= 15
+        and _now_tw.minute >= 30
+    ):
+        _col_a, _col_b = st.columns([5, 1])
+        _col_a.warning(
+            f"⏰ 行情資料停留在 **{_data_date}**，今日盤後資料已可更新（台灣時間 {_now_tw.strftime('%H:%M')}）"
+        )
+        if _col_b.button("🔄 更新今日收盤", use_container_width=True, key="auto_refresh_btn"):
+            load_market_data_action(include_tpex=True)
+            st.rerun()
+
     # 渲染側邊欄
     filters = render_sidebar(st.session_state.universe_df)
+    sc_category = st.session_state.get("sc_category", "全部產業")
 
     # ── 模型計算（帶快取）─────────────────────────────────────────
     _w   = str(sorted(st.session_state.weights.items()))
@@ -909,20 +905,7 @@ def main():
                 sentiment_data   = sentiment_data,
             )
 
-            # 加入回測命中率
-            if st.session_state.snapshots:
-                backtest = BacktestEngine(st.session_state.snapshots)
-                for idx, row in model_df.iterrows():
-                    hr, samples, source = backtest.calculate_hit_rate(row["ticker"], 20, 5)
-                    model_df.at[idx, "hit_rate"]         = hr if source == "本機快照" else round((row["prob5"] + row["prob20"] + row["prob60"]) / 3 * 0.85)
-                    model_df.at[idx, "hit_rate_source"]  = source if source == "本機快照" else "示範估算"
-                    model_df.at[idx, "local_sample_size"] = samples
-            else:
-                model_df["hit_rate"]          = (model_df["prob5"] + model_df["prob20"] + model_df["prob60"]) / 3 * 0.85
-                model_df["hit_rate_source"]   = "示範估算"
-                model_df["local_sample_size"] = 0
-
-            # 重算 final_composite（含真實 hit_rate + 板塊偏好 + 數據完整度 + 新聞情緒）
+            # 重算 final_composite（籌碼+技術+基本面三面向加權）
             pg = filters["preferred_groups"]
             group_boost_series        = model_df["group"].apply(lambda g: 4.0 if g in pg else 0.0)
             completeness_bonus_series = model_df["complete_score"].apply(lambda c: 3.0 if c else 0.0)
@@ -930,11 +913,10 @@ def main():
                 lambda t: float(max(-5.0, min(5.0, sentiment_data.get(t, 0) * 5)))
             )
             model_df["final_composite"] = (
-                model_df["prob20"]        * 0.35
-                + model_df["confidence"]  * 0.2
-                + model_df["hit_rate"]    * 0.2
-                + (100 - model_df["risk_score"]) * 0.15
-                + model_df["composite_score"] * 0.1
+                model_df["prob20"]        * 0.40
+                + model_df["confidence"]  * 0.25
+                + (100 - model_df["risk_score"]) * 0.20
+                + model_df["composite_score"] * 0.15
                 + group_boost_series
                 + completeness_bonus_series
                 + news_adj_series
@@ -949,32 +931,14 @@ def main():
     filtered_df = apply_filters(model_df, filters)
 
     # ── 頂部指標卡 ────────────────────────────────────────────────
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("📋 符合筆數",   len(filtered_df))
-    c2.metric("📊 平均20日機率", format_percentage(filtered_df["prob20"].mean() if not filtered_df.empty else 0))
+    c2.metric("📊 平均20日訊號", format_percentage(filtered_df["prob20"].mean() if not filtered_df.empty else 0))
     c3.metric("⭐ 核心候選",   int((filtered_df["candidate_level"] == "核心候選").sum()) if not filtered_df.empty else 0)
     c4.metric("💪 平均信心度", format_percentage(filtered_df["confidence"].mean() if not filtered_df.empty else 0))
-    c5.metric("🎯 平均命中率", format_percentage(filtered_df["hit_rate"].mean() if not filtered_df.empty else 0))
-
     real_fund_pct = (model_df["has_real_fund"].sum() / max(len(model_df), 1) * 100) if not model_df.empty else 0
     real_flow_pct = (model_df["has_real_flow"].sum() / max(len(model_df), 1) * 100) if not model_df.empty else 0
-    c6.metric("✅ 真實數據率", f"{real_fund_pct:.0f}%/{real_flow_pct:.0f}%", help="基本面/籌碼真實數據比例")
-
-    # ── 快照操作 ──────────────────────────────────────────────────
-    st.markdown("---")
-    bc1, bc2, bc3 = st.columns([2, 2, 4])
-    with bc1:
-        if st.button("💾 保存今日快照", use_container_width=True, type="primary"):
-            save_snapshot_action(model_df)
-    with bc2:
-        if st.button("🗑️ 清除快照", use_container_width=True):
-            clear_snapshots_action()
-    with bc3:
-        sc = len(st.session_state.snapshots)
-        if sc >= 5:
-            st.success(f"✅ 本機快照: {sc} 個交易日（已可回測）")
-        else:
-            st.info(f"📊 本機快照: {sc} 個交易日（建議至少 5 天）")
+    c5.metric("✅ 真實數據率", f"{real_fund_pct:.0f}%/{real_flow_pct:.0f}%", help="基本面/籌碼真實數據比例")
 
     # ── 分頁 ──────────────────────────────────────────────────────
     tabs = st.tabs([
@@ -985,9 +949,11 @@ def main():
         "💼 持倉管理",
         "⭐ 追蹤清單",
         "🔥 熱度排行",
-        "📊 產業總覽",
+        "📊 產業瀏覽器",
         "⚙️ 模型設定",
-        "📈 回測報告",
+        "🎯 潛力股",
+        "📈 ETF 排行",
+        "📊 基本面彙整",
     ])
 
     # ========== Tab 0: 整體分析 ==========
@@ -997,6 +963,34 @@ def main():
             st.warning("⚠️ 沒有資料，請先點擊左側「載入市場資料」")
         else:
             top10 = filtered_df.head(10).copy() if not filtered_df.empty else model_df.nlargest(10, "final_composite").copy()
+
+            # ── 本週市場話題 → 受益族群 ───────────────────────────────
+            with st.expander("📡 本週市場熱點話題（點選族群可在產業瀏覽器查看）", expanded=False):
+                try:
+                    _na = st.session_state.get("news_analyzer_obj")
+                    if _na is None:
+                        _na = NewsAnalyzer()
+                        st.session_state["news_analyzer_obj"] = _na
+                    _hot = _na.get_hot_topics()
+                    if _hot:
+                        for _ht in _hot[:6]:
+                            _topic    = _ht["topic"]
+                            _chains   = _ht["supply_chains"]
+                            _headlines = _ht.get("headlines", [])
+                            _ht_cols = st.columns([2] + [1] * min(len(_chains), 3))
+                            _ht_cols[0].markdown(f"**{_topic}**")
+                            for ci, sc in enumerate(_chains[:3], 1):
+                                if _ht_cols[ci].button(sc, key=f"hot_{_topic}_{sc}",
+                                                       use_container_width=True):
+                                    st.session_state["sc_browser_type"] = "supply"
+                                    st.session_state["sc_browser_key"]  = sc
+                                    st.info(f"已選取「{sc}」，請切換到「📊 產業瀏覽器」Tab 查看")
+                            if _headlines:
+                                st.caption(f"↳ {_headlines[0][:60]}…" if len(_headlines[0]) > 60 else f"↳ {_headlines[0]}")
+                    else:
+                        st.caption("暫無近期產業新聞熱點（需要網路連線）")
+                except Exception:
+                    st.caption("新聞熱點載入失敗")
 
             # ── 市場概況摘要 ──────────────────────────────────────────
             sc_label = f" ({sc_category})" if sc_category != "全部產業" else ""
@@ -1561,6 +1555,8 @@ def main():
             # ── 基本面 ──
             st.markdown("---")
             st.markdown("#### 📊 基本面（Yahoo Finance 主力 / FinMind 補月營收）")
+            epsfv   = {}   # 初始化，稍後在財報區塊內填充
+            val_pct = {}   # 同上
 
             fund_key = selected_ticker
             if fund_key in st.session_state.stock_fundamentals:
@@ -1603,6 +1599,20 @@ def main():
                             height=300, margin=dict(t=40, b=20),
                         )
                         st.plotly_chart(fig_rev, use_container_width=True)
+                        # 月營收數字表
+                        tbl_rev = rev_df[["month", "revenue", "yoy_pct", "mom_pct"]].copy()
+                        tbl_rev.columns = ["月份", "月營收(千元)", "年增%", "月增%"]
+                        tbl_rev["月營收(千元)"] = tbl_rev["月營收(千元)"].apply(
+                            lambda x: f"{int(x):,}" if pd.notna(x) else "--"
+                        )
+                        for col in ["年增%", "月增%"]:
+                            tbl_rev[col] = tbl_rev[col].apply(
+                                lambda x: f"{x:+.1f}%" if pd.notna(x) else "--"
+                            )
+                        st.dataframe(
+                            tbl_rev.sort_values("月份", ascending=False).reset_index(drop=True),
+                            use_container_width=True, hide_index=True, height=220,
+                        )
                     else:
                         st.info("⚠️ 無月營收資料（需 FinMind token 且已加入追蹤）")
 
@@ -1623,6 +1633,17 @@ def main():
                             height=300, margin=dict(t=40, b=20),
                         )
                         st.plotly_chart(fig_fin, use_container_width=True)
+                        # 季報數字表
+                        tbl_fin = fin_df[["quarter", "eps", "gross_margin", "net_margin"]].copy()
+                        tbl_fin.columns = ["季度", "EPS(元)", "毛利率%", "淨利率%"]
+                        for col in ["EPS(元)", "毛利率%", "淨利率%"]:
+                            tbl_fin[col] = tbl_fin[col].apply(
+                                lambda x: f"{x:.2f}" if pd.notna(x) else "--"
+                            )
+                        st.dataframe(
+                            tbl_fin.sort_values("季度", ascending=False).reset_index(drop=True),
+                            use_container_width=True, hide_index=True, height=220,
+                        )
                     else:
                         st.info("⚠️ 無季報資料")
 
@@ -1710,6 +1731,35 @@ def main():
                         else:
                             st.metric(label, curr_str, "分位資料不足")
 
+                # ── EPS 公平價估算 ──────────────────────────────────
+                st.markdown("---")
+                st.markdown("#### 💡 EPS 公平價估算（歷史 PE 分位 × 近四季 EPS）")
+                fm_epsfv = FinMindLoader(token=st.session_state.get("finmind_token", ""))
+                epsfv = fm_epsfv.get_eps_fair_value(selected_ticker)
+                if epsfv.get("has_data"):
+                    curr_price = stock.get("close")
+                    ev1, ev2, ev3 = st.columns(3)
+                    ev1.metric("保守價（PE 25th）", f"{epsfv['fair_low']:.1f}",
+                               help=f"PE {epsfv['pe_25']}x × EPS {epsfv['eps']:.2f}元")
+                    ev2.metric("合理價（PE 中位）", f"{epsfv['fair_mid']:.1f}",
+                               help=f"PE {epsfv['pe_50']}x × EPS {epsfv['eps']:.2f}元",
+                               delta=f"目前 {((curr_price / epsfv['fair_mid'] - 1) * 100):+.1f}%" if curr_price and epsfv['fair_mid'] else None)
+                    ev3.metric("樂觀價（PE 75th）", f"{epsfv['fair_high']:.1f}",
+                               help=f"PE {epsfv['pe_75']}x × EPS {epsfv['eps']:.2f}元")
+
+                    if curr_price:
+                        if curr_price < epsfv["fair_low"]:
+                            st.success(f"✅ 目前股價 {curr_price:.1f} 元低於保守估值，具備安全邊際")
+                        elif curr_price < epsfv["fair_mid"]:
+                            st.info(f"🟡 目前股價 {curr_price:.1f} 元介於保守與合理估值之間，偏合理")
+                        elif curr_price < epsfv["fair_high"]:
+                            st.warning(f"🟡 目前股價 {curr_price:.1f} 元高於合理中位（{epsfv['fair_mid']:.1f}），需留意估值風險")
+                        else:
+                            st.error(f"🔴 目前股價 {curr_price:.1f} 元超過樂觀估值（{epsfv['fair_high']:.1f}），追高風險高")
+                    st.caption("⚠️ 公平價係根據過去3年PE中位數×近四季EPS估算，僅供研究，不構成投資建議。")
+                else:
+                    st.caption("⚠️ EPS 公平價估算需要 FinMind 財報資料（token + 加入追蹤後自動更新）")
+
             # ── 籌碼 ──
             st.markdown("---")
             st.markdown("#### 💰 籌碼（TWSE 三大法人 + 融資融券）")
@@ -1718,8 +1768,10 @@ def main():
             # ── 技術分析 ──
             st.markdown("---")
             st.markdown("#### 📈 技術分析（FinMind 歷史數據）")
+            _ta_result = None
             if selected_ticker in st.session_state.tech_data:
-                render_tech_block(st.session_state.tech_data[selected_ticker], stock.to_dict())
+                _ta_result = st.session_state.tech_data[selected_ticker]
+                render_tech_block(_ta_result, stock.to_dict())
                 if st.button("🔄 重新載入技術分析", key=f"reload_tech_{selected_ticker}"):
                     st.session_state.tech_data.pop(selected_ticker, None)
                     st.rerun()
@@ -1729,10 +1781,101 @@ def main():
                     price_df = fm.get_price_history(selected_ticker, days=120)
                     ta = tech_analyze(price_df, selected_ticker, stock["name"])
                     st.session_state.tech_data[selected_ticker] = ta
+                    _ta_result = ta
                 if ta:
                     render_tech_block(ta, stock.to_dict())
                 else:
                     st.warning("⚠️ 無法取得歷史 K 線資料（可能為上櫃新股或 API 暫無數據）")
+
+            # ── 綜合操作區間 ──
+            if _ta_result and _ta_result.get("analysis"):
+                _analysis = _ta_result["analysis"]
+                _curr     = _analysis.get("current_price") or stock.get("close")
+                _supports = _analysis.get("supports", [])
+                _resists  = _analysis.get("resistances", [])
+                _rsi      = _analysis.get("rsi")
+                _bias20   = _analysis.get("bias20")
+                _kd_cross = _analysis.get("kd_cross", False)
+
+                # 取 EPS fair value（若基本面區塊已填充，否則為空 dict）
+                _epsfv = epsfv
+                _vp    = val_pct
+
+                st.markdown("---")
+                st.markdown("#### 📍 操作價格區間參考")
+                st.caption("⚠️ 以下價格區間整合技術面支撐壓力 + 基本面估值，僅供研究，不構成投資建議。")
+
+                with st.expander("展開操作區間分析", expanded=True):
+                    # 計算四個區間
+                    _buy_low  = _supports[-1] if _supports else (_curr * 0.90 if _curr else None)
+                    _buy_high = _supports[0]  if len(_supports) >= 1 else (_curr * 0.95 if _curr else None)
+                    _exit_low = _resists[0]   if _resists else (_curr * 1.08 if _curr else None)
+                    _exit_high = _resists[1]  if len(_resists) >= 2 else (_exit_low * 1.03 if _exit_low else None)
+                    _stop     = _supports[-1] if len(_supports) >= 2 else (_curr * 0.92 if _curr else None)
+
+                    # 若有基本面估值，用 fair_mid 修正觀望/出清邊界
+                    _fair_mid  = _epsfv.get("fair_mid")  if _epsfv.get("has_data") else None
+                    _fair_high = _epsfv.get("fair_high") if _epsfv.get("has_data") else None
+                    _pe_pct    = _vp.get("pe_pct")
+
+                    def _pstr(v):
+                        return f"{v:.1f}" if v is not None else "--"
+
+                    # ─ 買進區 ─
+                    _buy_reasons = []
+                    if _supports:
+                        _buy_reasons.append(f"接近支撐位（{_pstr(_buy_high)} 元附近）")
+                    if _pe_pct is not None and _pe_pct < 35:
+                        _buy_reasons.append(f"PE 在歷史 {_pe_pct:.0f}% 分位（偏低估）")
+                    if _analysis.get("bias20") is not None and _analysis["bias20"] < -8:
+                        _buy_reasons.append(f"MA20 乖離率 {_analysis['bias20']:.1f}%（超賣區）")
+                    if _kd_cross:
+                        _buy_reasons.append("KD 黃金交叉")
+
+                    # ─ 出清區 ─
+                    _exit_reasons = []
+                    if _resists:
+                        _exit_reasons.append(f"接近壓力位（{_pstr(_exit_low)} 元附近）")
+                    if _fair_high is not None:
+                        _exit_reasons.append(f"超過樂觀估值（{_pstr(_fair_high)} 元）")
+                    if _pe_pct is not None and _pe_pct > 70:
+                        _exit_reasons.append(f"PE 在歷史 {_pe_pct:.0f}% 分位（偏高估）")
+                    if _rsi is not None and _rsi > 70:
+                        _exit_reasons.append(f"RSI {_rsi:.1f}（超買）")
+                    if _bias20 is not None and _bias20 > 12:
+                        _exit_reasons.append(f"MA20 乖離率 +{_bias20:.1f}%（過熱）")
+
+                    # 顯示四格卡片
+                    z1, z2, z3, z4 = st.columns(4)
+                    with z1:
+                        st.markdown("🟢 **積極買進區**")
+                        st.markdown(f"**{_pstr(_buy_low)} — {_pstr(_buy_high)} 元**")
+                        for r in (_buy_reasons or ["技術支撐附近"]):
+                            st.caption(f"• {r}")
+                    with z2:
+                        _hold_lo = _buy_high or _curr
+                        _hold_hi = _fair_mid or (_curr * 1.03 if _curr else None)
+                        st.markdown("🟡 **分批介入 / 持有**")
+                        st.markdown(f"**{_pstr(_hold_lo)} — {_pstr(_hold_hi)} 元**")
+                        st.caption(f"• PE 合理區")
+                        if _fair_mid:
+                            st.caption(f"• 合理估值中位 {_pstr(_fair_mid)} 元附近")
+                    with z3:
+                        _watch_lo = _hold_hi or _curr
+                        _watch_hi = _exit_low
+                        st.markdown("⚪ **觀望 / 持股待漲**")
+                        st.markdown(f"**{_pstr(_watch_lo)} — {_pstr(_watch_hi)} 元**")
+                        st.caption("• 技術面仍偏多，但估值趨中性")
+                        st.caption("• 宜縮小新增部位")
+                    with z4:
+                        st.markdown("🔴 **逢高分批出清**")
+                        st.markdown(f"**{_pstr(_exit_low)} 元以上**")
+                        for r in (_exit_reasons or ["接近技術壓力區"]):
+                            st.caption(f"• {r}")
+
+                    st.markdown("---")
+                    _stop_reason = f"支撐失守（{_pstr(_stop)} 元）" if _stop else "技術破位"
+                    st.error(f"🔴 **止損參考**：{_pstr(_stop)} 元  ｜  理由：{_stop_reason}")
 
             # ── 新聞情緒 ──
             st.markdown("---")
@@ -2275,208 +2418,155 @@ def main():
                                     st.session_state["goto_ticker"] = sel_ticker_heat
                                     st.rerun()
 
-    # ========== Tab 7: 產業總覽 ==========
+    # ========== Tab 7: 產業瀏覽器（供應鏈二欄式儀表板）==========
     with tabs[7]:
         st.subheader("📊 產業 / 概念股瀏覽器")
         if model_df.empty:
             st.warning("⚠️ 請先載入市場資料")
         else:
-            ind_tab, concept_tab, chart_tab = st.tabs(["🏭 產業分類", "💡 概念股", "📈 產業統計圖"])
+            left_col, right_col = st.columns([1, 3])
 
-            # ── 共用輔助：mini-dashboard expander ─────────────────────
-            def _render_mini_dashboard(stock_row: pd.Series):
-                ticker = stock_row.get("ticker", "")
-                name   = stock_row.get("name", "")
-                close  = stock_row.get("close")
-                chg    = stock_row.get("change_pct")
-                vol    = stock_row.get("volume")
-                prob20 = stock_row.get("prob20", 50)
-                prob60 = stock_row.get("prob60", 50)
-                risk   = stock_row.get("risk_score", 50)
-                lv     = stock_row.get("candidate_level", "保守觀望")
-                er     = stock_row.get("expected_return_20d")
+            # ── 左欄：分類選單 ─────────────────────────────────────────
+            with left_col:
+                st.markdown("#### 📂 分類清單")
 
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("收盤", f"{close:.1f}" if close else "--",
-                          delta=f"{chg:+.2f}%" if chg is not None else None)
-                c2.metric("20日機率", f"{prob20:.0f}%")
-                c3.metric("60日機率", f"{prob60:.0f}%")
-                c4.metric("風險分", f"{risk:.0f}")
+                # 初始化選擇狀態
+                if "sc_browser_type" not in st.session_state:
+                    st.session_state["sc_browser_type"] = "supply"
+                if "sc_browser_key" not in st.session_state:
+                    first_major = list(SUPPLY_CHAIN_TREE.keys())[0]
+                    first_sub   = SUPPLY_CHAIN_TREE[first_major][0]
+                    st.session_state["sc_browser_key"] = first_sub
 
-                sc1, sc2 = st.columns([1, 1])
-                with sc1:
-                    # 六大因子雷達圖
-                    factors = ["動能", "成長", "品質", "價值", "籌碼", "低波動"]
-                    vals = [
-                        stock_row.get("momentum_score", 50),
-                        stock_row.get("growth_score",   50),
-                        stock_row.get("quality_score",  50),
-                        stock_row.get("value_score",    50),
-                        stock_row.get("flow_score",     50),
-                        stock_row.get("low_vol_score",  50),
-                    ]
-                    fig_r = go.Figure(go.Scatterpolar(
-                        r=vals + [vals[0]], theta=factors + [factors[0]],
-                        fill="toself", fillcolor="rgba(99,110,250,0.2)",
-                        line=dict(color="rgb(99,110,250)"),
-                    ))
-                    fig_r.update_layout(
-                        polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-                        showlegend=False, height=250,
-                        margin=dict(l=30, r=30, t=20, b=20),
+                # 供應鏈大類（可展開）
+                st.markdown("**🏭 供應鏈大類**")
+                for major_cat, sub_list in SUPPLY_CHAIN_TREE.items():
+                    with st.expander(major_cat, expanded=False):
+                        for sub in sub_list:
+                            is_active = (
+                                st.session_state["sc_browser_type"] == "supply"
+                                and st.session_state["sc_browser_key"] == sub
+                            )
+                            btn_label = f"● {sub}" if is_active else sub
+                            if st.button(btn_label, key=f"scb_{sub}", use_container_width=True,
+                                         type="primary" if is_active else "secondary"):
+                                st.session_state["sc_browser_type"] = "supply"
+                                st.session_state["sc_browser_key"]  = sub
+                                st.rerun()
+
+                # 概念股區塊
+                st.markdown("---\n**💡 概念股**")
+                for concept in CONCEPT_STOCKS.keys():
+                    is_active = (
+                        st.session_state["sc_browser_type"] == "concept"
+                        and st.session_state["sc_browser_key"] == concept
                     )
-                    st.plotly_chart(fig_r, use_container_width=True)
-                with sc2:
-                    st.markdown(f"**候選等級**：{lv}")
-                    if er is not None:
-                        st.markdown(f"**20日期望報酬**：{er:+.2f}%")
-                    vol_str = f"{int(vol/1000)}千股" if vol else "--"
-                    st.markdown(f"**成交量**：{vol_str}")
-                    market = stock_row.get("market", "")
-                    st.markdown(f"**市場**：{market}")
-                    st.markdown(f"**產業**：{stock_row.get('industry', '--')}")
-                    if st.button("🔍 完整個股分析", key=f"goto_{ticker}"):
-                        st.session_state["goto_ticker"] = ticker
-                        st.info(f"請切換到「🔍 個股分析」Tab，已預選 {ticker} {name}")
+                    btn_label = f"● {concept}" if is_active else concept
+                    if st.button(btn_label, key=f"scb_concept_{concept}", use_container_width=True,
+                                 type="primary" if is_active else "secondary"):
+                        st.session_state["sc_browser_type"] = "concept"
+                        st.session_state["sc_browser_key"]  = concept
+                        st.rerun()
 
-            # ── 共用：顯示股票列表 + 點選展開 mini-dashboard ──────────
-            def _render_stock_list(sub_df: pd.DataFrame, list_key: str):
-                if sub_df.empty:
-                    st.info("此分類目前無資料（載入市場資料後會更新）")
-                    return
+            # ── 右欄：供應鏈儀表板 ─────────────────────────────────────
+            with right_col:
+                sc_type = st.session_state.get("sc_browser_type", "supply")
+                sc_key  = st.session_state.get("sc_browser_key", "")
 
-                # 整理顯示欄位
-                disp = sub_df[["ticker", "name", "market"]].copy()
-                disp["收盤"]    = sub_df["close"].apply(lambda x: f"{x:.1f}" if pd.notna(x) and x else "--")
-                disp["漲跌%"]   = sub_df["change_pct"].apply(
-                    lambda x: f"{x:+.2f}%" if pd.notna(x) and x is not None else "--"
-                )
-                disp["成交量(萬)"] = sub_df["volume"].apply(
-                    lambda x: f"{int(x/10000)}" if pd.notna(x) and x else "--"
-                )
-                disp["20日機率"] = sub_df["prob20"].apply(lambda x: f"{x:.0f}%")
-                disp["候選等級"] = sub_df["candidate_level"]
-                disp["風險"]    = sub_df["risk_score"].apply(lambda x: f"{x:.0f}")
-                disp = disp.rename(columns={"ticker": "代號", "name": "名稱", "market": "市場"})
+                if sc_type == "supply":
+                    tickers_in = SUPPLY_CHAIN_GROUPS.get(sc_key, [])
+                    label_prefix = "🏭"
+                else:
+                    tickers_in = CONCEPT_STOCKS.get(sc_key, [])
+                    label_prefix = "💡"
 
-                st.dataframe(disp.reset_index(drop=True), use_container_width=True, height=350)
-                st.caption(f"共 {len(sub_df)} 支股票｜點選代號可展開詳細資訊")
+                if not sc_key:
+                    st.info("請在左側選擇供應鏈或概念股分類")
+                else:
+                    sub_df = model_df[model_df["ticker"].isin(tickers_in)].sort_values(
+                        "final_composite", ascending=False
+                    )
+                    missing_tickers = [t for t in tickers_in if t not in model_df["ticker"].values]
 
-                # 選股展開 mini-dashboard
-                selected_t = st.selectbox(
-                    "展開個股詳細資訊",
-                    ["（請選擇）"] + sub_df["ticker"].tolist(),
-                    format_func=lambda t: t if t == "（請選擇）" else
-                        f"{t}　{sub_df.loc[sub_df['ticker']==t, 'name'].iloc[0] if not sub_df.loc[sub_df['ticker']==t].empty else ''}",
-                    key=f"sel_{list_key}",
-                )
-                if selected_t != "（請選擇）":
-                    row = sub_df[sub_df["ticker"] == selected_t].iloc[0]
-                    with st.expander(f"📊 {selected_t} {row.get('name','')} — 快速儀表板", expanded=True):
-                        _render_mini_dashboard(row)
+                    st.markdown(f"### {label_prefix} {sc_key}（{len(sub_df)} / {len(tickers_in)} 支）")
 
-            # ── Tab A：產業分類 ──────────────────────────────────────
-            with ind_tab:
-                # 產業統計摘要卡片
-                ind_sum = model_df.groupby("group", dropna=False).agg(
-                    股票數=("ticker", "count"),
-                    平均20日機率=("prob20", "mean"),
-                    平均漲跌=("change_pct", "mean"),
-                    核心候選數=("candidate_level", lambda x: (x == "核心候選").sum()),
-                ).reset_index().rename(columns={"group": "產業"}).sort_values("平均20日機率", ascending=False)
+                    # 摘要指標列
+                    if not sub_df.empty:
+                        fn_col = pd.to_numeric(sub_df.get("foreign_net", pd.Series(dtype=float)), errors="coerce")
+                        avg_chg = sub_df["change_pct"].mean()
+                        total_fn = fn_col.sum()
+                        avg_risk = sub_df["risk_score"].mean()
+                        avg_pe   = pd.to_numeric(sub_df.get("pe", pd.Series(dtype=float)), errors="coerce").mean()
 
-                # 產業卡片牆（每行 4 格）
-                groups = ind_sum["產業"].tolist()
-                if "selected_industry" not in st.session_state:
-                    st.session_state["selected_industry"] = groups[0] if groups else ""
+                        m1, m2, m3, m4 = st.columns(4)
+                        m1.metric("平均漲跌", f"{avg_chg:+.2f}%" if pd.notna(avg_chg) else "--")
+                        m2.metric("外資合計", f"{int(total_fn):+,}張" if pd.notna(total_fn) else "--")
+                        m3.metric("平均風險分", f"{avg_risk:.0f}" if pd.notna(avg_risk) else "--")
+                        m4.metric("平均PE", f"{avg_pe:.1f}x" if pd.notna(avg_pe) and avg_pe > 0 else "--")
 
-                st.markdown("#### 選擇產業")
-                cols_per_row = 4
-                for i in range(0, len(groups), cols_per_row):
-                    row_cols = st.columns(cols_per_row)
-                    for j, grp in enumerate(groups[i:i+cols_per_row]):
-                        row_data = ind_sum[ind_sum["產業"] == grp].iloc[0]
-                        prob_avg = row_data["平均20日機率"]
-                        cnt      = int(row_data["股票數"])
-                        core     = int(row_data["核心候選數"])
-                        chg_avg  = row_data["平均漲跌"]
-                        chg_str  = f"{chg_avg:+.2f}%" if pd.notna(chg_avg) else "--"
-                        label    = f"**{grp}**\n{cnt}支｜{prob_avg:.0f}%機率｜{chg_str}"
-                        active   = (st.session_state["selected_industry"] == grp)
-                        btn_type = "primary" if active else "secondary"
-                        if row_cols[j].button(label, key=f"ind_{grp}", type=btn_type, use_container_width=True):
-                            st.session_state["selected_industry"] = grp
-                            st.rerun()
+                    st.markdown("---")
 
-                # 顯示所選產業的股票列表
-                sel_ind = st.session_state.get("selected_industry", "")
-                if sel_ind:
-                    st.markdown(f"---\n#### 🏭 {sel_ind}（{(model_df['group']==sel_ind).sum()} 支）")
-                    ind_stocks = model_df[model_df["group"] == sel_ind].sort_values("prob20", ascending=False)
-                    _render_stock_list(ind_stocks, f"ind_{sel_ind}")
+                    if sub_df.empty:
+                        st.info("此分類目前無市場資料，載入後自動更新")
+                    else:
+                        # 成分股表格
+                        disp = sub_df[["ticker", "name", "market"]].copy()
+                        disp["收盤"]      = sub_df["close"].apply(lambda x: f"{x:.1f}" if pd.notna(x) and x else "--")
+                        disp["漲跌%"]     = sub_df["change_pct"].apply(
+                            lambda x: f"{x:+.2f}%" if pd.notna(x) and x is not None else "--"
+                        )
+                        disp["成交量(萬)"] = sub_df["volume"].apply(
+                            lambda x: f"{int(x/10000)}" if pd.notna(x) and x else "--"
+                        )
+                        disp["籌碼訊號"]  = sub_df.apply(lambda r: (
+                            "🟢外資買" if pd.to_numeric(r.get("foreign_net"), errors="coerce") > 0
+                            else "🔴外資賣" if pd.to_numeric(r.get("foreign_net"), errors="coerce") < 0
+                            else "🟡中性"
+                        ), axis=1)
+                        disp["候選等級"]  = sub_df["candidate_level"]
+                        disp = disp.rename(columns={"ticker": "代號", "name": "名稱", "market": "市場"})
 
-            # ── Tab B：概念股 ────────────────────────────────────────
-            with concept_tab:
-                if "selected_concept" not in st.session_state:
-                    st.session_state["selected_concept"] = list(CONCEPT_STOCKS.keys())[0]
+                        st.dataframe(disp.reset_index(drop=True), use_container_width=True, height=320)
 
-                st.markdown("#### 選擇概念")
-                concepts = list(CONCEPT_STOCKS.keys())
-                cols_per_row = 3
-                for i in range(0, len(concepts), cols_per_row):
-                    row_cols = st.columns(cols_per_row)
-                    for j, concept in enumerate(concepts[i:i+cols_per_row]):
-                        tickers_in = CONCEPT_STOCKS[concept]
-                        sub = model_df[model_df["ticker"].isin(tickers_in)]
-                        cnt = len(sub)
-                        prob_avg = sub["prob20"].mean() if cnt else 0
-                        active   = (st.session_state["selected_concept"] == concept)
-                        btn_type = "primary" if active else "secondary"
-                        label    = f"**{concept}**\n{cnt}支｜{prob_avg:.0f}%機率"
-                        if row_cols[j].button(label, key=f"concept_{concept}", type=btn_type, use_container_width=True):
-                            st.session_state["selected_concept"] = concept
-                            st.rerun()
+                        if missing_tickers:
+                            st.caption(f"⚠️ 以下代碼未在市場資料中：{', '.join(missing_tickers)}")
 
-                sel_concept = st.session_state.get("selected_concept", "")
-                if sel_concept and sel_concept in CONCEPT_STOCKS:
-                    tickers_in = CONCEPT_STOCKS[sel_concept]
-                    concept_stocks_df = model_df[model_df["ticker"].isin(tickers_in)].sort_values("prob20", ascending=False)
-                    st.markdown(f"---\n#### 💡 {sel_concept}（{len(concept_stocks_df)} 支）")
-                    # 顯示不在市場資料中的股票（未上市或代碼不符）
-                    missing = [t for t in tickers_in if t not in model_df["ticker"].values]
-                    if missing:
-                        st.caption(f"以下代碼尚未載入：{', '.join(missing)}")
-                    _render_stock_list(concept_stocks_df, f"concept_{sel_concept}")
+                        # 點選個股跳轉
+                        sel_t = st.selectbox(
+                            "選股快速跳轉到個股分析",
+                            ["（請選擇）"] + sub_df["ticker"].tolist(),
+                            format_func=lambda t: t if t == "（請選擇）" else
+                                f"{t}　{sub_df.loc[sub_df['ticker']==t, 'name'].iloc[0] if not sub_df.loc[sub_df['ticker']==t].empty else ''}",
+                            key="sc_browser_goto",
+                        )
+                        if sel_t != "（請選擇）":
+                            if st.button(f"🔍 前往 {sel_t} 個股分析", key="sc_browser_goto_btn"):
+                                st.session_state["goto_ticker"] = sel_t
+                                st.info(f"請切換到「🔍 個股分析」Tab，已預選 {sel_t}")
 
-            # ── Tab C：產業統計圖（保留原有功能）───────────────────────
-            with chart_tab:
-                ind_full = model_df.groupby("group", dropna=False).agg(
-                    股票數=("ticker", "count"),
-                    平均20日機率=("prob20", "mean"),
-                    平均期望報酬=("expected_return_20d", "mean"),
-                    平均信心度=("confidence", "mean"),
-                    平均命中率=("hit_rate", "mean"),
-                    平均風險=("risk_score", "mean"),
-                    核心候選=("candidate_level", lambda x: (x == "核心候選").sum()),
-                ).reset_index().round({
-                    "平均20日機率": 1, "平均期望報酬": 2, "平均信心度": 1,
-                    "平均命中率": 1, "平均風險": 1,
-                }).rename(columns={"group": "產業"}).sort_values("平均20日機率", ascending=False)
-
-                st.dataframe(ind_full, use_container_width=True, height=380)
-                st.markdown("### 產業期望報酬 vs 風險")
-                fig = px.scatter(
-                    ind_full, x="平均期望報酬", y="平均風險",
-                    size="股票數", color="核心候選",
-                    hover_data=["產業", "平均信心度", "平均命中率"],
-                    text="產業", title="產業期望報酬風險分析",
-                    labels={"平均期望報酬": "20日期望報酬(%)", "平均風險": "風險分數"},
-                    color_continuous_scale="Viridis",
-                )
-                fig.update_traces(textposition="top center")
-                fig.add_hline(y=50, line_dash="dash", line_color="gray", opacity=0.5)
-                fig.add_vline(x=0, line_dash="dash", line_color="green", opacity=0.5)
-                st.plotly_chart(fig, use_container_width=True)
+                    # 相關產業新聞
+                    st.markdown("---\n#### 📰 相關產業新聞")
+                    with st.spinner("載入產業新聞..."):
+                        try:
+                            news_analyzer = st.session_state.get("news_analyzer_obj")
+                            if news_analyzer is None:
+                                news_analyzer = NewsAnalyzer()
+                                st.session_state["news_analyzer_obj"] = news_analyzer
+                            events = news_analyzer.fetch_industry_events(supply_chain=sc_key)
+                            if events:
+                                for ev in events[:6]:
+                                    pub = ev.get("published", "")[:10]
+                                    cat = ev.get("category", "")
+                                    title = ev.get("title", "")
+                                    link  = ev.get("link", "")
+                                    if link:
+                                        st.markdown(f"- [{title}]({link}) `{cat}` {pub}")
+                                    else:
+                                        st.markdown(f"- {title} `{cat}` {pub}")
+                            else:
+                                st.caption("暫無相關產業新聞（需要網路連線）")
+                        except Exception:
+                            st.caption("產業新聞載入失敗")
 
     # ========== Tab 8: 模型設定 ==========
     with tabs[8]:
@@ -2648,49 +2738,376 @@ def main():
                         if "notes" in restored:
                             st.session_state.notes = restored["notes"]
                             write_json(NOTES_FILE, restored["notes"])
-                        if "snapshots" in restored:
-                            st.session_state.snapshots = restored["snapshots"]
-                            write_json(SNAPSHOT_FILE, restored["snapshots"])
                         st.success("✅ 資料還原完成！")
                         st.rerun()
                 except Exception as e:
                     st.error(f"❌ 備份檔格式錯誤：{e}")
 
-    # ========== Tab 9: 回測報告 ==========
+
+    # ========== Tab 9: 潛力股 ==========
     with tabs[9]:
-        st.subheader("回測報告")
-        sc = len(st.session_state.snapshots)
-        if sc < 5:
-            st.warning(f"⚠️ 快照不足（目前 {sc} 筆，建議至少 10 筆）\n\n請每日盤後點擊「💾 保存今日快照」")
+        st.subheader("🎯 每日潛力補漲候選")
+        st.caption("⚠️ 以下為模型信號，不構成投資建議。請結合基本面自行判斷。")
+
+        if model_df.empty:
+            st.warning("⚠️ 請先載入市場資料")
         else:
-            backtest = BacktestEngine(st.session_state.snapshots)
-            start_d, end_d = backtest.get_date_range()
-            st.success(f"✅ 已累積 {sc} 個交易日快照")
-            st.caption(f"📅 {start_d} ~ {end_d}")
+            # 條件說明
+            c1, c2, c3, c4 = st.columns(4)
+            c1.info("📉 落後同族群")
+            c2.info("🏦 外資淨買超")
+            c3.info("📈 技術金叉中")
+            c4.info("📊 基本面及格")
 
-            st.markdown("### 📊 整體回測統計")
-            sample_tickers = model_df["ticker"].head(50).tolist()
-            with st.spinner("計算中..."):
-                stats = backtest.calculate_aggregate_stats(sample_tickers, 20, 3)
-            bc1, bc2, bc3, bc4 = st.columns(4)
-            bc1.metric("平均命中率", format_percentage(stats["avg_hit_rate"]))
-            bc2.metric("中位命中率", format_percentage(stats["median_hit_rate"]))
-            bc3.metric("有效樣本數", stats["valid_stocks"])
-            bc4.metric("總觀測數",   stats["total_samples"])
+            st.markdown("---")
 
-            if stats["valid_stocks"] > 0:
-                hit_rates = []
-                for t in sample_tickers:
-                    hr, _, src = backtest.calculate_hit_rate(t, 20, 3)
-                    if src == "本機快照":
-                        hit_rates.append(hr)
-                if hit_rates:
-                    fig = px.histogram(x=hit_rates, nbins=20, title="20日命中率分布",
-                                       labels={"x": "命中率(%)", "y": "股票數"},
-                                       color_discrete_sequence=["rgb(99,110,250)"])
-                    fig.add_vline(x=np.mean(hit_rates), line_dash="dash", line_color="red",
-                                  annotation_text=f"平均: {np.mean(hit_rates):.1f}%")
-                    st.plotly_chart(fig, use_container_width=True)
+            with st.spinner("分析中..."):
+                catchup_df = model.find_catchup_candidates(model_df, top_n=10)
+
+            if catchup_df.empty:
+                st.info("目前條件下無符合候選（需要籌碼數據與技術面資料，請先載入市場資料）")
+            else:
+                st.markdown(f"**找到 {len(catchup_df)} 支補漲候選**")
+                for rank, (_, row) in enumerate(catchup_df.iterrows(), 1):
+                    ticker  = row.get("ticker", "")
+                    name    = row.get("name", "")
+                    group   = row.get("group", "")
+                    close   = row.get("close")
+                    chg     = row.get("change_pct")
+                    fn      = row.get("foreign_net")
+                    flow    = row.get("flow_score", 50)
+                    quality = row.get("quality_score", 50)
+                    growth  = row.get("growth_score", 50)
+                    peer_lag = row.get("peer_lag_score", 50)
+                    inst_e  = row.get("inst_entry", 0)
+                    kd_x    = row.get("kd_cross", False)
+                    macd_p  = row.get("macd_pre_cross", False)
+                    pe      = row.get("pe")
+                    gm      = row.get("gross_margin")
+                    rev_yoy = row.get("revenue_yoy")
+
+                    chg_str  = f"▲{chg:+.2f}%" if chg and chg > 0 else (f"▼{chg:.2f}%" if chg else "--")
+                    close_str = f"{close:.1f}" if close else "--"
+                    fn_str   = f"+{int(fn):,}張" if fn and fn > 0 else ("--" if not fn else f"{int(fn):,}張")
+
+                    # 訊號燈
+                    lag_icon  = "🟢" if peer_lag > 55 else "🟡"
+                    inst_icon = "🟢" if inst_e else "🟡"
+                    tech_icon = "🟢" if (kd_x or macd_p) else "🟡"
+                    fund_icon = "🟢" if (quality > 50 and growth > 50) else "🟡"
+
+                    with st.expander(
+                        f"#{rank}  {ticker} {name}  {group}  {chg_str}  "
+                        f"{lag_icon}{inst_icon}{tech_icon}{fund_icon}",
+                        expanded=(rank <= 3),
+                    ):
+                        r1c1, r1c2, r1c3 = st.columns(3)
+                        r1c1.metric("收盤", close_str, delta=f"{chg:+.2f}%" if chg else None)
+                        r1c2.metric("外資", fn_str)
+                        r1c3.metric("族群落後分位", f"{peer_lag:.0f}" if peer_lag else "--")
+
+                        r2c1, r2c2, r2c3, r2c4 = st.columns(4)
+                        r2c1.markdown(f"**籌碼**  {inst_icon} 外資{'入場' if inst_e else '觀望'}")
+                        r2c2.markdown(f"**技術**  {'🟢 KD金叉' if kd_x else ('🟡 MACD收斂' if macd_p else '🟡 待觀察')}")
+                        r2c3.markdown(f"**PE**  {f'{pe:.1f}x' if pe else '--'}")
+                        r2c4.markdown(f"**毛利率**  {f'{gm:.1f}%' if gm else '--'}")
+
+                        if rev_yoy is not None:
+                            st.markdown(f"**營收YoY**：{rev_yoy:+.1f}%  ｜  **品質分**：{quality:.0f}  ｜  **成長分**：{growth:.0f}")
+
+                        # PE 歷史分位（快速估值判斷）
+                        _ckey = f"catchup_val_{ticker}"
+                        if _ckey not in st.session_state:
+                            st.session_state[_ckey] = None
+                        if st.session_state[_ckey] is None and rank <= 5:
+                            try:
+                                _fm_c = FinMindLoader(token=st.session_state.get("finmind_token", ""))
+                                st.session_state[_ckey] = _fm_c.get_valuation_percentile(ticker)
+                            except Exception:
+                                st.session_state[_ckey] = {}
+                        _cvp = st.session_state.get(_ckey) or {}
+                        if _cvp.get("pe_pct") is not None:
+                            _pe_pct_c = _cvp["pe_pct"]
+                            _pe_icon  = "🟢" if _pe_pct_c < 35 else ("🔴" if _pe_pct_c > 70 else "🟡")
+                            st.markdown(f"**估值分位** {_pe_icon} PE 在歷史 {_pe_pct_c:.0f}% 分位 — {_cvp.get('status','')}")
+
+                        if st.button("🔍 完整個股分析", key=f"catchup_goto_{ticker}_{rank}"):
+                            st.session_state["goto_ticker"] = ticker
+                            st.info(f"請切換到「🔍 個股分析」Tab，已預選 {ticker}")
+
+    # ========== Tab 10: ETF 排行 ==========
+    with tabs[10]:
+        st.subheader("📈 ETF 績效排行")
+        st.caption("⚠️ 報酬率為統計性指標，不構成投資建議。ETF 成分股資料來自 yfinance，台灣 ETF 可能資料不足。")
+
+        if model_df.empty:
+            st.warning("⚠️ 請先載入市場資料")
+        else:
+            # 篩出 ETF
+            etf_mask = (
+                model_df["ticker"].str.startswith("00")
+                | model_df["group"].str.contains("ETF", na=False)
+                | model_df["industry"].str.contains("ETF|指數股票型|槓桿", na=False)
+            )
+            etf_df = model_df[etf_mask].copy()
+
+            if etf_df.empty:
+                st.info("目前市場資料中無 ETF（代碼以 00 開頭的 ETF 需透過 TWSE API 或 TPEx API 載入）")
+            else:
+                sort_opt = st.radio(
+                    "排序依據",
+                    ["今日漲跌", "月報酬", "季報酬", "年報酬"],
+                    horizontal=True,
+                    key="etf_sort",
+                )
+
+                fm_inst = st.session_state.get("fm_loader")
+                if fm_inst is None:
+                    fm_inst = FinMindLoader(st.session_state.get("finmind_token", ""))
+
+                # 計算報酬率（使用快取，批次一次性）
+                if "etf_perf_cache" not in st.session_state:
+                    st.session_state["etf_perf_cache"] = {}
+
+                with st.spinner("計算 ETF 報酬率（首次需時較長）..."):
+                    for t in etf_df["ticker"].tolist():
+                        if t not in st.session_state["etf_perf_cache"]:
+                            st.session_state["etf_perf_cache"][t] = fm_inst.get_etf_performance(t)
+
+                etf_df["月報酬%"]  = etf_df["ticker"].apply(
+                    lambda t: st.session_state["etf_perf_cache"].get(t, {}).get("month")
+                )
+                etf_df["季報酬%"]  = etf_df["ticker"].apply(
+                    lambda t: st.session_state["etf_perf_cache"].get(t, {}).get("quarter")
+                )
+                etf_df["年報酬%"]  = etf_df["ticker"].apply(
+                    lambda t: st.session_state["etf_perf_cache"].get(t, {}).get("year")
+                )
+
+                sort_col_map = {
+                    "今日漲跌": "change_pct",
+                    "月報酬":   "月報酬%",
+                    "季報酬":   "季報酬%",
+                    "年報酬":   "年報酬%",
+                }
+                sort_col = sort_col_map[sort_opt]
+                etf_sorted = etf_df.dropna(subset=[sort_col]).sort_values(sort_col, ascending=False).head(10)
+
+                if etf_sorted.empty:
+                    st.info("目前無足夠 ETF 績效資料（需要歷史 OHLCV，請確認 FinMind Token 或等資料累積）")
+                else:
+                    # 顯示排行表
+                    disp_etf = etf_sorted[["ticker", "name"]].copy()
+                    disp_etf["收盤"]   = etf_sorted["close"].apply(lambda x: f"{x:.2f}" if pd.notna(x) and x else "--")
+                    disp_etf["今日%"]  = etf_sorted["change_pct"].apply(
+                        lambda x: f"{x:+.2f}%" if pd.notna(x) and x is not None else "--"
+                    )
+                    disp_etf["月報酬"] = etf_sorted["月報酬%"].apply(
+                        lambda x: f"{x:+.2f}%" if pd.notna(x) else "--"
+                    )
+                    disp_etf["季報酬"] = etf_sorted["季報酬%"].apply(
+                        lambda x: f"{x:+.2f}%" if pd.notna(x) else "--"
+                    )
+                    disp_etf["年報酬"] = etf_sorted["年報酬%"].apply(
+                        lambda x: f"{x:+.2f}%" if pd.notna(x) else "--"
+                    )
+                    disp_etf["成交量(萬)"] = etf_sorted["volume"].apply(
+                        lambda x: f"{int(x/10000)}" if pd.notna(x) and x else "--"
+                    )
+                    disp_etf = disp_etf.rename(columns={"ticker": "代號", "name": "名稱"})
+                    disp_etf.insert(0, "排名", range(1, len(disp_etf) + 1))
+
+                    st.dataframe(disp_etf.reset_index(drop=True), use_container_width=True, hide_index=True)
+
+                    st.markdown("---")
+                    st.markdown("#### 展開 ETF 詳情")
+                    sel_etf = st.selectbox(
+                        "選擇 ETF",
+                        ["（請選擇）"] + etf_sorted["ticker"].tolist(),
+                        format_func=lambda t: t if t == "（請選擇）" else
+                            f"{t}　{etf_sorted.loc[etf_sorted['ticker']==t, 'name'].iloc[0] if not etf_sorted.loc[etf_sorted['ticker']==t].empty else ''}",
+                        key="etf_detail_select",
+                    )
+                    if sel_etf != "（請選擇）":
+                        sel_row = etf_sorted[etf_sorted["ticker"] == sel_etf].iloc[0]
+                        with st.expander(f"📊 {sel_etf} {sel_row.get('name','')} 詳情", expanded=True):
+                            d1, d2, d3, d4 = st.columns(4)
+                            d1.metric("月報酬", f"{sel_row['月報酬%']:+.2f}%" if pd.notna(sel_row['月報酬%']) else "--")
+                            d2.metric("季報酬", f"{sel_row['季報酬%']:+.2f}%" if pd.notna(sel_row['季報酬%']) else "--")
+                            d3.metric("年報酬", f"{sel_row['年報酬%']:+.2f}%" if pd.notna(sel_row['年報酬%']) else "--")
+                            d4.metric("今日", f"{sel_row['change_pct']:+.2f}%" if pd.notna(sel_row.get('change_pct')) else "--")
+
+                            # 前十大成分股（yfinance）
+                            st.markdown("**前十大成分股**")
+                            try:
+                                import yfinance as yf
+                                etf_yf = yf.Ticker(f"{sel_etf}.TW")
+                                holdings = None
+                                try:
+                                    fd = etf_yf.funds_data
+                                    holdings = fd.top_holdings if fd else None
+                                except Exception:
+                                    pass
+                                if holdings is not None and not holdings.empty:
+                                    st.dataframe(holdings, use_container_width=True, height=240)
+                                else:
+                                    st.caption("⚠️ 台灣 ETF 成分股資料不足（yfinance 未收錄此 ETF 的持股明細）")
+                            except Exception:
+                                st.caption("⚠️ 成分股資料載入失敗")
+
+
+    # ========== Tab 11: 基本面彙整 ==========
+    with tabs[11]:
+        st.subheader("📊 基本面彙整 — 自選股跨公司比較")
+        st.caption("⚠️ 財務數據來自 FinMind / Yahoo Finance，僅供研究參考，不構成投資建議。")
+
+        wl = st.session_state.get("watchlist", {})
+        if not wl:
+            st.info("⭐ 請先在「追蹤清單」Tab 加入自選股，再回此頁查看跨公司比較。")
+        else:
+            fm_fund = FinMindLoader(token=st.session_state.get("finmind_token", ""))
+            tickers = list(wl.keys())
+
+            # ── 批次載入（帶 session 快取）──
+            if "fundsummary_cache" not in st.session_state:
+                st.session_state["fundsummary_cache"] = {}
+
+            missing_rev = [t for t in tickers if f"rev_{t}" not in st.session_state["fundsummary_cache"]]
+            missing_fin = [t for t in tickers if f"fin_{t}" not in st.session_state["fundsummary_cache"]]
+
+            if missing_rev or missing_fin:
+                with st.spinner(f"載入 {len(tickers)} 檔自選股基本面（首次需時較長，後續快取）..."):
+                    for t in tickers:
+                        if f"rev_{t}" not in st.session_state["fundsummary_cache"]:
+                            st.session_state["fundsummary_cache"][f"rev_{t}"] = fm_fund.get_revenue_trend(t, months=13)
+                        if f"fin_{t}" not in st.session_state["fundsummary_cache"]:
+                            st.session_state["fundsummary_cache"][f"fin_{t}"] = fm_fund.get_financial_trend(t, quarters=8)
+
+            # 整理名稱對照
+            name_map = {t: wl[t].get("name", t) for t in tickers}
+
+            st.markdown("---")
+
+            # ── 區塊 1：月營收 YoY% 矩陣 ──
+            st.markdown("#### 📅 月營收年增率（YoY%）比較")
+            rev_rows = {}
+            all_months = set()
+            for t in tickers:
+                trend = st.session_state["fundsummary_cache"].get(f"rev_{t}", [])
+                if trend:
+                    rev_rows[t] = {r["month"]: r.get("yoy_pct") for r in trend}
+                    all_months.update(rev_rows[t].keys())
+
+            if rev_rows:
+                sorted_months = sorted(all_months, reverse=True)[:13]
+                rev_matrix = {}
+                for t in tickers:
+                    if t not in rev_rows:
+                        continue
+                    label = f"{t} {name_map[t]}"
+                    row = {}
+                    for m in sorted_months:
+                        val = rev_rows[t].get(m)
+                        row[m] = f"{val:+.1f}%" if val is not None else "--"
+                    rev_matrix[label] = row
+                if rev_matrix:
+                    rev_mat_df = pd.DataFrame(rev_matrix).T
+                    rev_mat_df = rev_mat_df[sorted_months]
+                    # 標色：正增長綠、負增長紅
+                    def _color_yoy(val):
+                        if val == "--" or not isinstance(val, str):
+                            return ""
+                        try:
+                            num = float(val.replace("%", "").replace("+", ""))
+                            if num > 10:
+                                return "background-color:#d4edda; color:#155724"
+                            if num > 0:
+                                return "background-color:#e8f5e9; color:#1b5e20"
+                            if num < -10:
+                                return "background-color:#f8d7da; color:#721c24"
+                            if num < 0:
+                                return "background-color:#fff3cd; color:#856404"
+                        except Exception:
+                            pass
+                        return ""
+                    st.dataframe(
+                        rev_mat_df.style.map(_color_yoy),
+                        use_container_width=True,
+                        height=min(60 + len(rev_matrix) * 35, 400),
+                    )
+                    st.caption("綠：正成長 ｜ 紅：負成長 ｜ 深色：>±10%")
+                else:
+                    st.info("⚠️ 無月營收資料（需 FinMind token 或資料尚未更新）")
+            else:
+                st.info("⚠️ 無月營收資料（需 FinMind token 或資料尚未更新）")
+
+            st.markdown("---")
+
+            # ── 區塊 2：季 EPS 比較表 ──
+            st.markdown("#### 📈 近 8 季 EPS（元）比較")
+            fin_rows = {}
+            all_quarters = set()
+            for t in tickers:
+                trend = st.session_state["fundsummary_cache"].get(f"fin_{t}", [])
+                if trend:
+                    fin_rows[t] = {r["quarter"]: r.get("eps") for r in trend}
+                    all_quarters.update(fin_rows[t].keys())
+
+            if fin_rows:
+                sorted_quarters = sorted(all_quarters, reverse=True)[:8]
+                eps_matrix = {}
+                for t in tickers:
+                    if t not in fin_rows:
+                        continue
+                    label = f"{t} {name_map[t]}"
+                    row = {}
+                    for q in sorted_quarters:
+                        val = fin_rows[t].get(q)
+                        row[q] = f"{val:.2f}" if val is not None else "--"
+                    eps_matrix[label] = row
+                if eps_matrix:
+                    eps_mat_df = pd.DataFrame(eps_matrix).T
+                    eps_mat_df = eps_mat_df[sorted_quarters]
+                    st.dataframe(eps_mat_df, use_container_width=True,
+                                 height=min(60 + len(eps_matrix) * 35, 400))
+                else:
+                    st.info("⚠️ 無季報 EPS 資料")
+            else:
+                st.info("⚠️ 無季報 EPS 資料")
+
+            st.markdown("---")
+
+            # ── 區塊 3：最新基本面快照 ──
+            st.markdown("#### 🔢 最新基本面快照")
+            snap_rows = []
+            for t in tickers:
+                fd = st.session_state.get("watchlist_data", {}).get(t, {}).get("fundamental")
+                if fd is None:
+                    fd = fm_fund.get_fundamental(t)
+                rev_t = st.session_state["fundsummary_cache"].get(f"rev_{t}", [])
+                latest_yoy = rev_t[-1].get("yoy_pct") if rev_t else None
+                latest_month = rev_t[-1].get("month", "--") if rev_t else "--"
+                snap_rows.append({
+                    "代號": t,
+                    "名稱": name_map[t],
+                    f"最新月YoY%\n({latest_month})": f"{latest_yoy:+.1f}%" if latest_yoy is not None else "--",
+                    "EPS(元)": f"{fd.get('eps'):.2f}" if fd.get("eps") is not None else "--",
+                    "PE": f"{fd.get('pe'):.1f}" if fd.get("pe") is not None else "--",
+                    "PB": f"{fd.get('pb'):.2f}" if fd.get("pb") is not None else "--",
+                    "殖利率%": f"{fd.get('dividend_yield'):.2f}%" if fd.get("dividend_yield") is not None else "--",
+                    "毛利率%": f"{fd.get('gross_margin'):.1f}%" if fd.get("gross_margin") is not None else "--",
+                    "淨利率%": f"{fd.get('net_margin'):.1f}%" if fd.get("net_margin") is not None else "--",
+                    "ROE%": f"{fd.get('roe'):.1f}%" if fd.get("roe") is not None else "--",
+                    "資料來源": fd.get("data_source", "--"),
+                })
+            if snap_rows:
+                st.dataframe(pd.DataFrame(snap_rows), use_container_width=True, hide_index=True)
+            st.caption("⚠️ 所有財務數據均為歷史資料，不構成個人化投資建議。")
+
+            # ── 重新整理按鈕 ──
+            if st.button("🔄 重新載入自選股基本面", key="fundsummary_refresh"):
+                st.session_state.pop("fundsummary_cache", None)
+                st.rerun()
 
 
 # ============================================================

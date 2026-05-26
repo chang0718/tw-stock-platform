@@ -106,7 +106,7 @@ class NewsAnalyzer:
 
     def _hit(self, key: str):
         e = self._cache.get(key)
-        if e and (time.time() - e.get("ts", 0)) < _TTL:
+        if e and (time.time() - e.get("ts", 0)) < e.get("ttl", _TTL):
             return e["data"]
         return None
 
@@ -504,3 +504,47 @@ class NewsAnalyzer:
         out = results[:25]
         self._put(key, out)
         return out
+
+    def get_hot_topics(self) -> List[Dict]:
+        """
+        彙整近期產業新聞，映射到受益供應鏈族群。
+        回傳 [{"topic": str, "supply_chains": List[str], "headlines": List[str], "count": int}]
+        快取 2 小時
+        """
+        key = "hot_topics"
+        cached = self._hit(key)
+        if cached is not None:
+            return cached
+
+        from config import NEWS_TO_SUPPLY_CHAIN
+
+        # _INDUSTRY_QUERIES category → NEWS_TO_SUPPLY_CHAIN key 的模糊映射
+        # 先按 category 歸類已抓到的新聞
+        all_events = self.fetch_industry_events()
+        cat_to_articles: dict = {}
+        for ev in all_events:
+            cat = ev.get("category", "")
+            cat_to_articles.setdefault(cat, []).append(ev["title"])
+
+        results = []
+        for topic, supply_chains in NEWS_TO_SUPPLY_CHAIN.items():
+            # 找出 category 名稱和 topic 相關的新聞
+            matched_headlines: List[str] = []
+            for cat, headlines in cat_to_articles.items():
+                # 模糊匹配：topic 或 category 有任意共同字
+                topic_words = set(topic.replace("／", "").replace(" ", ""))
+                cat_words   = set(cat.replace("／", "").replace(" ", ""))
+                if topic_words & cat_words:
+                    matched_headlines.extend(headlines)
+            if matched_headlines:
+                results.append({
+                    "topic":         topic,
+                    "supply_chains": supply_chains,
+                    "headlines":     matched_headlines[:2],
+                    "count":         len(matched_headlines),
+                })
+
+        results.sort(key=lambda x: x["count"], reverse=True)
+        self._cache[key] = {"ts": time.time(), "data": results, "ttl": 7200}
+        self._flush()
+        return results

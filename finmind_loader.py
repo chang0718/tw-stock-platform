@@ -119,7 +119,7 @@ class FinMindLoader:
                 "pe":                   _f(pe),
                 "pb":                   _f(pb),
                 "eps":                  _f(eps),
-                "dividend_yield":       _f(dy * 100) if dy else None,
+                "dividend_yield":       _f(dy * 100) if dy and 0 < dy < 0.30 else None,
                 "gross_margin":         _f(gm * 100) if gm else None,
                 "net_margin":           _f(nm * 100) if nm else None,
                 "revenue_yoy":          _f(ry * 100) if ry else None,
@@ -436,6 +436,52 @@ class FinMindLoader:
 
         return result
 
+    def get_eps_fair_value(self, ticker: str) -> Dict:
+        """
+        用歷史中位數 PE × 近四季 EPS，估算基本面公平價區間。
+        回傳：{
+            fair_low:  float|None,   # 25th percentile PE × EPS
+            fair_mid:  float|None,   # median PE × EPS
+            fair_high: float|None,   # 75th percentile PE × EPS
+            pe_25:  float|None,
+            pe_50:  float|None,
+            pe_75:  float|None,
+            eps:    float|None,
+            has_data: bool,
+        }
+        完全基於 get_per_trend() + get_fundamental()，無需額外 API。
+        """
+        trend = self.get_per_trend(ticker, months=36)
+        fund  = self.get_fundamental(ticker)
+        eps   = fund.get("eps")
+
+        empty = {"fair_low": None, "fair_mid": None, "fair_high": None,
+                 "pe_25": None, "pe_50": None, "pe_75": None,
+                 "eps": eps, "has_data": False}
+
+        if not trend or eps is None or eps <= 0:
+            return empty
+
+        pe_hist = sorted([r["pe"] for r in trend if r["pe"] is not None and r["pe"] > 0])
+        if len(pe_hist) < 6:
+            return empty
+
+        n = len(pe_hist)
+        pe_25 = pe_hist[int(n * 0.25)]
+        pe_50 = pe_hist[int(n * 0.50)]
+        pe_75 = pe_hist[int(n * 0.75)]
+
+        return {
+            "fair_low":  round(pe_25 * eps, 2),
+            "fair_mid":  round(pe_50 * eps, 2),
+            "fair_high": round(pe_75 * eps, 2),
+            "pe_25":     round(pe_25, 1),
+            "pe_50":     round(pe_50, 1),
+            "pe_75":     round(pe_75, 1),
+            "eps":       eps,
+            "has_data":  True,
+        }
+
     def get_price_history(self, ticker: str, days: int = 120) -> Optional[pd.DataFrame]:
         """
         取得個股歷史 OHLCV（用於技術分析）
@@ -499,3 +545,24 @@ class FinMindLoader:
         self._cache[key] = {"ts": time.time(), "data": df.to_dict("records")}
         self._flush()
         return df
+
+    def get_etf_performance(self, ticker: str) -> dict:
+        """
+        計算 ETF 月/季/年報酬率（從 get_price_history 取首末收盤計算）
+        回傳 {"month": float|None, "quarter": float|None, "year": float|None}
+        """
+        def _period_return(days: int) -> Optional[float]:
+            df = self.get_price_history(ticker, days=days + 5)
+            if df is None or len(df) < 2:
+                return None
+            first = df["close"].iloc[0]
+            last  = df["close"].iloc[-1]
+            if first and first > 0:
+                return round((last / first - 1) * 100, 2)
+            return None
+
+        return {
+            "month":   _period_return(20),
+            "quarter": _period_return(60),
+            "year":    _period_return(252),
+        }

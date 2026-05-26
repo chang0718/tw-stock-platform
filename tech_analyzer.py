@@ -111,6 +111,16 @@ def calc_atr(df: pd.DataFrame, n: int = 14) -> pd.Series:
     return tr.rolling(n).mean()
 
 
+def calc_kd(df: pd.DataFrame, n: int = 9, m: int = 3):
+    """KD 隨機指標：回傳 (K, D) Series"""
+    low_n  = df["low"].rolling(n).min()
+    high_n = df["high"].rolling(n).max()
+    rsv = (df["close"] - low_n) / (high_n - low_n).replace(0, np.nan) * 100
+    k = rsv.ewm(com=m - 1, adjust=False).mean()
+    d = k.ewm(com=m - 1, adjust=False).mean()
+    return k.round(2), d.round(2)
+
+
 # ── 主要分析函數 ─────────────────────────────────────────────────
 
 def analyze(df: pd.DataFrame, ticker: str = "", name: str = "") -> Dict:
@@ -141,6 +151,9 @@ def analyze(df: pd.DataFrame, ticker: str = "", name: str = "") -> Dict:
     bias20 = ((close - ma20) / ma20 * 100).round(2)
     bias60 = ((close - ma60) / ma60 * 100).round(2)
 
+    # KD 隨機指標
+    k_series, d_series = calc_kd(df)
+
     last    = close.iloc[-1]
     last_rsi       = rsi.iloc[-1]
     last_macd      = macd_line.iloc[-1]
@@ -157,6 +170,10 @@ def analyze(df: pd.DataFrame, ticker: str = "", name: str = "") -> Dict:
     last_vol_ma    = vol_ma20.iloc[-1]
     last_bias20    = bias20.iloc[-1] if not np.isnan(bias20.iloc[-1]) else None
     last_bias60    = bias60.iloc[-1] if not np.isnan(bias60.iloc[-1]) else None
+    last_k         = k_series.iloc[-1]  if not np.isnan(k_series.iloc[-1])  else None
+    last_d         = d_series.iloc[-1]  if not np.isnan(d_series.iloc[-1])  else None
+    prev_k         = k_series.iloc[-2]  if len(k_series) >= 2 and not np.isnan(k_series.iloc[-2]) else None
+    prev_d         = d_series.iloc[-2]  if len(d_series) >= 2 and not np.isnan(d_series.iloc[-2]) else None
 
     # ── 訊號判斷 ──
     signals: List[str] = []
@@ -264,6 +281,23 @@ def analyze(df: pd.DataFrame, ticker: str = "", name: str = "") -> Dict:
             score += 1
         else:
             signals.append(f"🟡 MA20乖離率 {last_bias20:.1f}%（合理區間）")
+
+    # KD 隨機指標
+    if last_k is not None and last_d is not None:
+        if prev_k is not None and prev_d is not None and prev_k < prev_d and last_k > last_d:
+            signals.append(f"🟢 KD 黃金交叉（K={last_k:.1f} 上穿 D={last_d:.1f}），短線轉多訊號")
+            score += 2
+        elif prev_k is not None and prev_d is not None and prev_k > prev_d and last_k < last_d:
+            signals.append(f"🔴 KD 死亡交叉（K={last_k:.1f} 下穿 D={last_d:.1f}），短線轉弱訊號")
+            score -= 2
+        elif last_k < 20 and last_d < 20:
+            signals.append(f"🟢 KD 超賣區（K={last_k:.1f} D={last_d:.1f}），留意反彈機會")
+            score += 1
+        elif last_k > 80 and last_d > 80:
+            signals.append(f"🔴 KD 超買區（K={last_k:.1f} D={last_d:.1f}），注意獲利了結壓力")
+            score -= 1
+        else:
+            signals.append(f"🟡 KD 中性（K={last_k:.1f} D={last_d:.1f}）")
 
     # ── 長期均線訊號 ──
     last_ma120 = ma120.iloc[-1] if not np.isnan(ma120.iloc[-1]) else None
@@ -393,6 +427,8 @@ def analyze(df: pd.DataFrame, ticker: str = "", name: str = "") -> Dict:
             "vol_ma20":    vol_ma20.tolist(),
             "bias20":      bias20.tolist(),
             "bias60":      bias60.tolist(),
+            "k_val":       k_series.tolist(),
+            "d_val":       d_series.tolist(),
         },
         "analysis": {
             "score":         score,
@@ -414,5 +450,8 @@ def analyze(df: pd.DataFrame, ticker: str = "", name: str = "") -> Dict:
             "ma240":         round(last_ma240, 2) if last_ma240 is not None else None,
             "bias20":        round(last_bias20, 2) if last_bias20 is not None else None,
             "bias60":        round(last_bias60, 2) if last_bias60 is not None else None,
+            "k_val":         round(last_k, 1) if last_k is not None else None,
+            "d_val":         round(last_d, 1) if last_d is not None else None,
+            "kd_cross":      (prev_k is not None and prev_d is not None and prev_k < prev_d and last_k is not None and last_d is not None and last_k > last_d),
         },
     }

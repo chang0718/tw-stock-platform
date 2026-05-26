@@ -213,7 +213,7 @@ class QuantModel:
         fn  = metrics.get("foreign_net")
 
         value_score    = clamp(92 - pe * 1.35)        if pe is not None else 50
-        quality_score  = clamp(38 + (gm or 30) * 0.8 + eg * 0.18)
+        quality_score  = clamp(38 + gm * 0.8 + eg * 0.18) if gm is not None else 50
         growth_score   = clamp(48 + ry * 0.7          + eg * 0.25)
         momentum_score = clamp(50 + m20 * 0.65        + m60 * 0.35 + cp * 3)
         flow_score     = clamp(50 + fn / 120)          if fn is not None else 50
@@ -468,6 +468,36 @@ class QuantModel:
         # Pass 2：跨截面 Z-score 替換因子分數
         result = self._apply_cross_sectional_scores(result)
 
+        # 族群落後分：同 group 均值 - 個股 momentum_score → 越大代表落後越多（補漲空間）
+        grp_avg_mom = result.groupby("group")["momentum_score"].transform("mean")
+        peer_lag_raw = grp_avg_mom - result["momentum_score"]
+        result["peer_lag_score"] = self._cross_sectional_score(peer_lag_raw)
+
+        # 外資入場訊號：今日淨買超 且 籌碼分不過熱（剛開始買）
+        fn_series = pd.to_numeric(result["foreign_net"], errors="coerce")
+        result["inst_entry"] = ((fn_series > 0) & (result["flow_score"] < 60)).astype(int)
+
+        # MACD 即將金叉：從 price_history 計算（close-only MACD，histogram 前負今收斂）
+        def _macd_pre_cross(ticker: str) -> bool:
+            hist = self.price_history.get(ticker, [])
+            closes = [p["close"] for p in hist if p.get("close") is not None]
+            if len(closes) < 35:
+                return False
+            s = pd.Series(closes, dtype=float)
+            ema12 = s.ewm(span=12, adjust=False).mean()
+            ema26 = s.ewm(span=26, adjust=False).mean()
+            macd  = ema12 - ema26
+            sig   = macd.ewm(span=9, adjust=False).mean()
+            hist_s = macd - sig
+            if len(hist_s) < 3:
+                return False
+            prev_h = hist_s.iloc[-2]
+            curr_h = hist_s.iloc[-1]
+            # 前一根柱狀為負且本根絕對值縮小（收斂中）
+            return bool(prev_h < 0 and abs(curr_h) < abs(prev_h))
+
+        result["macd_pre_cross"] = result["ticker"].apply(_macd_pre_cross)
+
         # Pass 3：用跨截面因子分數重算 composite / risk / probability
         for idx, row in result.iterrows():
             scores = {
@@ -544,6 +574,59 @@ class QuantModel:
         )
         result["final_composite"] = (base_fc + group_boost + completeness_bonus + news_adj).round(2)
         return result
+
+    def find_catchup_candidates(
+        self, df: pd.DataFrame, top_n: int = 10
+    ) -> pd.DataFrame:
+        """
+        每日落後補漲候選：族群落後 + 外資入場 + 技術金叉 + 基本面及格
+        df 必須已經過 enrich_dataframe()（含 peer_lag_score / inst_entry / kd_cross）
+        """
+        if df.empty:
+            return pd.DataFrame()
+
+        needed = {"peer_lag_score", "inst_entry", "quality_score", "growth_score"}
+        missing = needed - set(df.columns)
+        if missing:
+            return pd.DataFrame()
+
+        sub = df.copy()
+
+        # 基本條件：基本面及格
+        sub = sub[
+            (sub["quality_score"] > 45) &
+            (sub["growth_score"]  > 45)
+        ]
+        if sub.empty:
+            return sub
+
+        # 計算技術金叉分（KD金叉 或 MACD柱翻正）
+        def _tech_cross_score(row):
+            score = 0
+            if row.get("kd_cross", False):
+                score += 2
+            if row.get("macd_pre_cross", False):
+                score += 1
+            return score
+
+        if "kd_cross" not in sub.columns:
+            sub["kd_cross"] = False
+        if "macd_pre_cross" not in sub.columns:
+            sub["macd_pre_cross"] = False
+
+        sub["_tech_cross"] = sub.apply(_tech_cross_score, axis=1)
+
+        # 四維度加權排序（不硬性 AND 以避免無候選）
+        sub["_catchup_score"] = (
+            sub["peer_lag_score"] * 0.35
+            + sub["flow_score"]   * 0.30
+            + sub["_tech_cross"]  * 10 * 0.20   # 0~3 → 縮放至百分制
+            + sub["inst_entry"]   * 100 * 0.15
+        )
+
+        # 偏好落後族群 + 外資入場的股票排序，但條件不全的仍可出現
+        result = sub.sort_values("_catchup_score", ascending=False).head(top_n)
+        return result.drop(columns=["_catchup_score", "_tech_cross"], errors="ignore")
 
     def calculate_industry_heat(
         self,
