@@ -143,20 +143,35 @@ class FinMindLoader:
         rows = self._api(
             "TaiwanStockMonthRevenue",
             ticker,
-            (datetime.now() - timedelta(days=400)).strftime("%Y-%m-%d"),
+            (datetime.now() - timedelta(days=760)).strftime("%Y-%m-%d"),  # 25個月確保有去年同月
         )
         if not rows or len(rows) < 2:
             return None
         df = pd.DataFrame(rows).sort_values("date")
-        rev = df["revenue"].astype(float)
-        result = {"latest_revenue_month": df.iloc[-1]["date"]}
-        if rev.iloc[-2] != 0:
+        df["revenue"] = pd.to_numeric(df["revenue"], errors="coerce")
+        df = df.dropna(subset=["revenue"])
+        if df.empty:
+            return None
+        df["ym"] = df["date"].astype(str).str[:7]
+        ym_rev = df.drop_duplicates("ym", keep="last").set_index("ym")["revenue"]
+
+        latest_ym = ym_rev.index[-1]
+        latest_rev = float(ym_rev.iloc[-1])
+        result = {"latest_revenue_month": latest_ym}
+
+        # MoM：比前一個月
+        if len(ym_rev) >= 2 and ym_rev.iloc[-2] != 0:
             result["revenue_mom"] = round(
-                (rev.iloc[-1] - rev.iloc[-2]) / abs(rev.iloc[-2]) * 100, 2
+                (latest_rev - float(ym_rev.iloc[-2])) / abs(float(ym_rev.iloc[-2])) * 100, 2
             )
-        if len(df) >= 13 and rev.iloc[-13] != 0:
+
+        # YoY：依日期找去年同月，避免缺月造成位移誤差
+        yr, mo = int(latest_ym[:4]), int(latest_ym[5:7])
+        prev_ym = f"{yr - 1:04d}-{mo:02d}"
+        if prev_ym in ym_rev.index and ym_rev[prev_ym] != 0:
+            prev_rev = float(ym_rev[prev_ym])
             result["revenue_yoy"] = round(
-                (rev.iloc[-1] - rev.iloc[-13]) / abs(rev.iloc[-13]) * 100, 2
+                (latest_rev - prev_rev) / abs(prev_rev) * 100, 2
             )
         return result
 
@@ -174,21 +189,30 @@ class FinMindLoader:
 
         rows = self._api(
             "TaiwanStockMonthRevenue", ticker,
-            (datetime.now() - timedelta(days=400)).strftime("%Y-%m-%d"),
+            (datetime.now() - timedelta(days=760)).strftime("%Y-%m-%d"),  # 25個月
         )
         if rows and len(rows) >= 2:
             df = pd.DataFrame(rows).sort_values("date")
-            rev = df["revenue"].astype(float)
-            out["latest_revenue_month"] = df.iloc[-1]["date"]
-            if rev.iloc[-2] != 0:
-                out["revenue_mom"] = round(
-                    (rev.iloc[-1] - rev.iloc[-2]) / abs(rev.iloc[-2]) * 100, 2
-                )
-            if len(df) >= 13 and rev.iloc[-13] != 0:
-                out["revenue_yoy"] = round(
-                    (rev.iloc[-1] - rev.iloc[-13]) / abs(rev.iloc[-13]) * 100, 2
-                )
-            has = True
+            df["revenue"] = pd.to_numeric(df["revenue"], errors="coerce")
+            df = df.dropna(subset=["revenue"])
+            if not df.empty:
+                df["ym"] = df["date"].astype(str).str[:7]
+                ym_rev = df.drop_duplicates("ym", keep="last").set_index("ym")["revenue"]
+                latest_ym = ym_rev.index[-1]
+                latest_rev = float(ym_rev.iloc[-1])
+                out["latest_revenue_month"] = latest_ym
+                if len(ym_rev) >= 2 and ym_rev.iloc[-2] != 0:
+                    out["revenue_mom"] = round(
+                        (latest_rev - float(ym_rev.iloc[-2])) / abs(float(ym_rev.iloc[-2])) * 100, 2
+                    )
+                yr, mo = int(latest_ym[:4]), int(latest_ym[5:7])
+                prev_ym = f"{yr - 1:04d}-{mo:02d}"
+                if prev_ym in ym_rev.index and ym_rev[prev_ym] != 0:
+                    prev_rev = float(ym_rev[prev_ym])
+                    out["revenue_yoy"] = round(
+                        (latest_rev - prev_rev) / abs(prev_rev) * 100, 2
+                    )
+                has = True
 
         rows = self._api(
             "TaiwanStockFinancialStatements", ticker,
@@ -274,29 +298,45 @@ class FinMindLoader:
         if cached is not None:
             return cached
 
-        start = (datetime.now() - timedelta(days=30 * (months + 14))).strftime("%Y-%m-%d")
+        # 拉 25 個月確保有去年同月數據
+        start = (datetime.now() - timedelta(days=760)).strftime("%Y-%m-%d")
         rows  = self._api("TaiwanStockMonthRevenue", ticker, start)
         if not rows:
             return []
 
         df = pd.DataFrame(rows).sort_values("date")
         df["revenue"] = pd.to_numeric(df["revenue"], errors="coerce")
-        df = df.dropna(subset=["revenue"]).tail(months + 13)
+        df = df.dropna(subset=["revenue"])
+        df["ym"] = df["date"].astype(str).str[:7]
+        df = df.drop_duplicates("ym", keep="last").reset_index(drop=True)
+
+        # 建立 ym → revenue 查詢表，供日期比對 YoY
+        ym_rev = df.set_index("ym")["revenue"].to_dict()
 
         result = []
-        for i, (_, r) in enumerate(df.iterrows()):
+        for _, r in df.iterrows():
+            curr_ym = r["ym"]
+            curr_rev = float(r["revenue"])
             mom = yoy = None
-            if i > 0:
-                prev_rev = df.iloc[i - 1]["revenue"]
-                if prev_rev:
-                    mom = round((r["revenue"] - prev_rev) / abs(prev_rev) * 100, 2)
-            if i >= 12:
-                yoy_rev = df.iloc[i - 12]["revenue"]
-                if yoy_rev:
-                    yoy = round((r["revenue"] - yoy_rev) / abs(yoy_rev) * 100, 2)
+
+            # MoM：找上個月
+            yr, mo = int(curr_ym[:4]), int(curr_ym[5:7])
+            mo -= 1
+            if mo == 0:
+                mo, yr = 12, yr - 1
+            prev_ym = f"{yr:04d}-{mo:02d}"
+            if prev_ym in ym_rev and ym_rev[prev_ym]:
+                mom = round((curr_rev - ym_rev[prev_ym]) / abs(ym_rev[prev_ym]) * 100, 2)
+
+            # YoY：找去年同月（日期比對，不用位置索引）
+            yr2, mo2 = int(curr_ym[:4]), int(curr_ym[5:7])
+            prev_yr_ym = f"{yr2 - 1:04d}-{mo2:02d}"
+            if prev_yr_ym in ym_rev and ym_rev[prev_yr_ym]:
+                yoy = round((curr_rev - ym_rev[prev_yr_ym]) / abs(ym_rev[prev_yr_ym]) * 100, 2)
+
             result.append({
-                "month":   str(r["date"])[:7],
-                "revenue": int(r["revenue"]),
+                "month":   curr_ym,
+                "revenue": int(curr_rev),
                 "yoy_pct": yoy,
                 "mom_pct": mom,
             })
