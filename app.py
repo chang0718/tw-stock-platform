@@ -318,41 +318,24 @@ def render_sidebar(universe_df: pd.DataFrame) -> Dict:
 
     filters: Dict = {}
 
-    # ── 供應鏈兩層選擇 ─────────────────────────────────────────
-    st.sidebar.markdown("### 🏭 供應鏈篩選")
-    sc_categories = ["全部產業"] + list(SUPPLY_CHAIN_TREE.keys())
-    sc_category = st.sidebar.selectbox("大類", sc_categories, key="sc_category")
+    # ── 供應鏈篩選已移至 Tab 7 產業瀏覽器 ────────────────────────
+    filters["supply_chains"] = []  # Tab 7 pills 選擇，此處不再篩選
 
-    if sc_category == "全部產業":
-        sub_options: list = []
-        selected_scs: list = []
-    else:
-        sub_options = SUPPLY_CHAIN_TREE.get(sc_category, [])
-        selected_scs = st.sidebar.multiselect(
-            "子供應鏈（多選，空=整個大類）",
-            sub_options,
-            default=[],
-            key="sc_sub",
-        )
-        if not selected_scs:
-            selected_scs = sub_options  # 空選 = 整個大類全選
-    filters["supply_chains"] = selected_scs
+    # ── 快速搜尋（移至最頂）─────────────────────────────────────
+    st.sidebar.markdown("### 🔍 快速搜尋")
+    filters["query"] = st.sidebar.text_input(
+        "", placeholder="代號、名稱、產業，如 2330", key="search_query",
+        label_visibility="collapsed",
+    )
 
-    if selected_scs:
-        total_tickers = sum(len(SUPPLY_CHAIN_GROUPS.get(sc, [])) for sc in selected_scs)
-        st.sidebar.caption(f"篩選範圍：{len(selected_scs)} 個子鏈 / 約 {total_tickers} 支成分股")
-
-    st.sidebar.markdown("### 🔍 其他篩選")
-    filters["industry"] = st.sidebar.selectbox("產業別", ["全部"] + available_groups, key="industry_filter")
+    st.sidebar.markdown("### 🎯 篩選條件")
     filters["market"]   = st.sidebar.selectbox("市場",   ["全部"] + available_markets, key="market_filter")
-    filters["query"]    = st.sidebar.text_input("自由搜尋", placeholder="代號、名稱、產業...", key="search_query")
-
-    st.sidebar.markdown("### 🎯 進階篩選")
     filters["candidate_level"] = st.sidebar.selectbox(
-        "研究候選等級",
+        "候選等級",
         ["全部", "核心候選", "觀察候選", "高風險觀察", "保守觀望"],
         key="candidate_filter",
     )
+    filters["industry"] = st.sidebar.selectbox("產業別", ["全部"] + available_groups, key="industry_filter")
 
     st.sidebar.markdown("### 📈 排序與顯示")
     sort_options = {
@@ -433,6 +416,9 @@ def render_sidebar(universe_df: pd.DataFrame) -> Dict:
                     uq = universe_df["group"].unique()
                     st.write(f"產業數: {len(uq)}")
                     st.write(f"產業（前5）: {list(uq[:5])}...")
+
+    st.sidebar.markdown("---")
+    st.sidebar.caption("💡 按 `[` 鍵可收合側邊欄，獲得更大瀏覽區域。\n\n供應鏈/概念股篩選已移至「📊 產業瀏覽器」Tab。")
 
     return filters
 
@@ -820,6 +806,14 @@ def main():
 
     initialize_session_state()
 
+    st.markdown("""<style>
+    .stTabs [data-baseweb="tab"] { font-size:13px; padding:8px 10px; }
+    [data-testid="metric-container"] {
+        background:#161b22; border:1px solid #30363d;
+        border-radius:6px; padding:12px;
+    }
+    </style>""", unsafe_allow_html=True)
+
     st.title("📈 台股盤後量化分析平台")
     st.caption(
         "✨ **v3.0 真實數據版** | "
@@ -870,7 +864,7 @@ def main():
 
     # 渲染側邊欄
     filters = render_sidebar(st.session_state.universe_df)
-    sc_category = st.session_state.get("sc_category", "全部產業")
+    sc_category = "全部產業"  # 供應鏈篩選已移至 Tab 7，sidebar 不再設定
 
     # ── 模型計算（帶快取）─────────────────────────────────────────
     _w   = str(sorted(st.session_state.weights.items()))
@@ -1111,9 +1105,26 @@ def main():
                     if stock.get("risk_score", 0) > 70:
                         st.warning("⚠️ 風險提醒：此股波動較大，請控制部位，勿重押。")
 
-                    if st.button("🔍 查看完整個股分析", key=f"top10_goto_{stock['ticker']}"):
-                        st.session_state["goto_ticker"] = stock["ticker"]
-                        st.rerun()
+                    _btn_c1, _btn_c2 = st.columns(2)
+                    with _btn_c1:
+                        if st.button("🔍 個股分析", key=f"top10_goto_{stock['ticker']}",
+                                     use_container_width=True):
+                            st.session_state["goto_ticker"] = stock["ticker"]
+                            st.rerun()
+                    with _btn_c2:
+                        _already_in = stock["ticker"] in st.session_state.watchlist
+                        if not _already_in:
+                            if st.button("⭐ 加入追蹤", key=f"top10_wl_{stock['ticker']}",
+                                         use_container_width=True):
+                                st.session_state.watchlist[stock["ticker"]] = {
+                                    "name": stock["name"],
+                                    "added_date": date.today().isoformat(),
+                                }
+                                write_json(WATCHLIST_FILE, st.session_state.watchlist)
+                                st.session_state.model_cache_key = ""
+                                st.rerun()
+                        else:
+                            st.caption("✅ 已追蹤")
 
             st.markdown("---")
             csv_cols = [c for c in ["ticker", "name", "market", "group", "close", "change_pct",
@@ -2424,54 +2435,65 @@ def main():
         if model_df.empty:
             st.warning("⚠️ 請先載入市場資料")
         else:
-            left_col, right_col = st.columns([1, 3])
+            # ── 三竹風格：頂部 pills 導覽（全寬）──────────────────────────
+            # 第一列：模式切換（概念股 / 供應鏈）
+            mode_sel = st.radio(
+                "瀏覽模式",
+                ["💡 概念股", "🏭 供應鏈"],
+                horizontal=True,
+                key="tab7_mode",
+                label_visibility="collapsed",
+            )
 
-            # ── 左欄：分類選單 ─────────────────────────────────────────
-            with left_col:
-                st.markdown("#### 📂 分類清單")
+            if mode_sel == "💡 概念股":
+                # 第二列：概念股 pills
+                concept_keys = list(CONCEPT_STOCKS.keys())
+                _init_concept = st.session_state.get("sc_browser_key") \
+                    if st.session_state.get("sc_browser_type") == "concept" else None
+                _init_concept = _init_concept if _init_concept in concept_keys else concept_keys[0]
+                sel_concept = st.pills(
+                    "概念股分類",
+                    concept_keys,
+                    default=_init_concept,
+                    selection_mode="single",
+                    key="tab7_concept_pill",
+                    label_visibility="collapsed",
+                )
+                sc_key  = sel_concept or concept_keys[0]
+                sc_type = "concept"
+                st.session_state["sc_browser_type"] = "concept"
+                st.session_state["sc_browser_key"]  = sc_key
+            else:
+                # 第二列：供應鏈大類 pills
+                major_keys = list(SUPPLY_CHAIN_TREE.keys())
+                _init_major = major_keys[0]
+                sel_major = st.pills(
+                    "供應鏈大類",
+                    major_keys,
+                    default=_init_major,
+                    selection_mode="single",
+                    key="tab7_major_pill",
+                    label_visibility="collapsed",
+                )
+                major_key = sel_major or major_keys[0]
+                # 第三列：子類 pills（key 含大類名稱，避免切換大類時殘留舊選擇）
+                sub_keys = SUPPLY_CHAIN_TREE.get(major_key, [])
+                _major_slug = major_key.split()[0]
+                sel_sub = st.pills(
+                    "子供應鏈",
+                    sub_keys,
+                    default=sub_keys[0] if sub_keys else None,
+                    selection_mode="single",
+                    key=f"tab7_sub_{_major_slug}",
+                    label_visibility="collapsed",
+                )
+                sc_key  = sel_sub or (sub_keys[0] if sub_keys else "")
+                sc_type = "supply"
+                st.session_state["sc_browser_type"] = "supply"
+                st.session_state["sc_browser_key"]  = sc_key
 
-                # 初始化選擇狀態
-                if "sc_browser_type" not in st.session_state:
-                    st.session_state["sc_browser_type"] = "supply"
-                if "sc_browser_key" not in st.session_state:
-                    first_major = list(SUPPLY_CHAIN_TREE.keys())[0]
-                    first_sub   = SUPPLY_CHAIN_TREE[first_major][0]
-                    st.session_state["sc_browser_key"] = first_sub
-
-                # 供應鏈大類（可展開）
-                st.markdown("**🏭 供應鏈大類**")
-                for major_cat, sub_list in SUPPLY_CHAIN_TREE.items():
-                    with st.expander(major_cat, expanded=False):
-                        for sub in sub_list:
-                            is_active = (
-                                st.session_state["sc_browser_type"] == "supply"
-                                and st.session_state["sc_browser_key"] == sub
-                            )
-                            btn_label = f"● {sub}" if is_active else sub
-                            if st.button(btn_label, key=f"scb_{sub}", use_container_width=True,
-                                         type="primary" if is_active else "secondary"):
-                                st.session_state["sc_browser_type"] = "supply"
-                                st.session_state["sc_browser_key"]  = sub
-                                st.rerun()
-
-                # 概念股區塊
-                st.markdown("---\n**💡 概念股**")
-                for concept in CONCEPT_STOCKS.keys():
-                    is_active = (
-                        st.session_state["sc_browser_type"] == "concept"
-                        and st.session_state["sc_browser_key"] == concept
-                    )
-                    btn_label = f"● {concept}" if is_active else concept
-                    if st.button(btn_label, key=f"scb_concept_{concept}", use_container_width=True,
-                                 type="primary" if is_active else "secondary"):
-                        st.session_state["sc_browser_type"] = "concept"
-                        st.session_state["sc_browser_key"]  = concept
-                        st.rerun()
-
-            # ── 右欄：供應鏈儀表板 ─────────────────────────────────────
-            with right_col:
-                sc_type = st.session_state.get("sc_browser_type", "supply")
-                sc_key  = st.session_state.get("sc_browser_key", "")
+            # ── 右側內容區（全寬）────────────────────────────────────────
+            if True:  # 原先的 with right_col，現在改為全寬
 
                 if sc_type == "supply":
                     tickers_in = SUPPLY_CHAIN_GROUPS.get(sc_key, [])
@@ -2509,24 +2531,71 @@ def main():
                     if sub_df.empty:
                         st.info("此分類目前無市場資料，載入後自動更新")
                     else:
-                        # 成分股表格
-                        disp = sub_df[["ticker", "name", "market"]].copy()
-                        disp["收盤"]      = sub_df["close"].apply(lambda x: f"{x:.1f}" if pd.notna(x) and x else "--")
-                        disp["漲跌%"]     = sub_df["change_pct"].apply(
-                            lambda x: f"{x:+.2f}%" if pd.notna(x) and x is not None else "--"
-                        )
-                        disp["成交量(萬)"] = sub_df["volume"].apply(
-                            lambda x: f"{int(x/10000)}" if pd.notna(x) and x else "--"
-                        )
-                        disp["籌碼訊號"]  = sub_df.apply(lambda r: (
-                            "🟢外資買" if pd.to_numeric(r.get("foreign_net"), errors="coerce") > 0
-                            else "🔴外資賣" if pd.to_numeric(r.get("foreign_net"), errors="coerce") < 0
-                            else "🟡中性"
-                        ), axis=1)
-                        disp["候選等級"]  = sub_df["candidate_level"]
-                        disp = disp.rename(columns={"ticker": "代號", "name": "名稱", "market": "市場"})
+                        # ── 三竹風格：HTML 卡片行清單 ─────────────────────────
+                        if "tab7_css" not in st.session_state:
+                            st.markdown("""
+<style>
+.sc-row{display:flex;align-items:center;padding:8px 14px;border:1px solid #30363d;
+  border-radius:6px;margin-bottom:5px;background:#161b22;font-size:14px;gap:0;}
+.sc-row:hover{border-color:#1f6feb;background:#1c2128;}
+.sc-tid{font-weight:700;width:56px;color:#e6edf3;flex-shrink:0;}
+.sc-nm{flex:1;color:#8b949e;font-size:13px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding-right:8px;}
+.sc-px{width:68px;text-align:right;font-weight:600;flex-shrink:0;}
+.sc-chg{width:80px;text-align:right;font-weight:600;flex-shrink:0;}
+.sc-vol{width:72px;text-align:right;color:#8b949e;font-size:12px;flex-shrink:0;}
+.sc-sig{width:60px;text-align:center;font-size:13px;flex-shrink:0;}
+.sc-lv{width:52px;text-align:center;font-size:11px;flex-shrink:0;}
+.up{color:#ef5350;}.down{color:#26a69a;}
+.badge-c{background:#1f6feb22;color:#388bfd;border:1px solid #1f6feb;border-radius:3px;padding:1px 4px;}
+.badge-w{background:#d2992222;color:#d29922;border:1px solid #d29922;border-radius:3px;padding:1px 4px;}
+</style>""", unsafe_allow_html=True)
+                            st.session_state["tab7_css"] = True
 
-                        st.dataframe(disp.reset_index(drop=True), use_container_width=True, height=320)
+                        cards = []
+                        # 欄標題行
+                        cards.append(
+                            '<div class="sc-row" style="border-color:#1f6feb22;background:#0d1117;'
+                            'font-size:11px;color:#8b949e;padding:4px 14px;">'
+                            '<span class="sc-tid">代號</span>'
+                            '<span class="sc-nm">名稱</span>'
+                            '<span class="sc-px">收盤</span>'
+                            '<span class="sc-chg">漲跌%</span>'
+                            '<span class="sc-vol">成交量</span>'
+                            '<span class="sc-sig">籌碼</span>'
+                            '<span class="sc-lv">等級</span>'
+                            '</div>'
+                        )
+                        for _, r in sub_df.iterrows():
+                            close = r.get("close")
+                            chg   = r.get("change_pct")
+                            fn    = pd.to_numeric(r.get("foreign_net"), errors="coerce")
+                            vol   = r.get("volume")
+                            level = str(r.get("candidate_level", ""))
+                            px_s  = f"{close:.1f}" if pd.notna(close) and close else "--"
+                            chg_c = "up" if (chg and chg > 0) else ("down" if chg and chg < 0 else "")
+                            chg_s = (f"▲{chg:.2f}%" if chg and chg > 0
+                                     else f"▼{abs(chg):.2f}%" if chg and chg < 0 else "--")
+                            vol_s = f"{int(vol/10000)}萬" if pd.notna(vol) and vol else "--"
+                            sig   = ("🟢" if (pd.notna(fn) and fn > 0)
+                                     else ("🔴" if (pd.notna(fn) and fn < 0) else "🟡"))
+                            nm    = str(r.get("name", ""))[:8].replace("<", "&lt;").replace(">", "&gt;")
+                            lv_html = ""
+                            if level == "核心候選":
+                                lv_html = '<span class="badge-c">核心</span>'
+                            elif level == "觀察候選":
+                                lv_html = '<span class="badge-w">觀察</span>'
+                            cards.append(
+                                f'<div class="sc-row">'
+                                f'<span class="sc-tid">{r["ticker"]}</span>'
+                                f'<span class="sc-nm">{nm}</span>'
+                                f'<span class="sc-px">{px_s}</span>'
+                                f'<span class="sc-chg {chg_c}">{chg_s}</span>'
+                                f'<span class="sc-vol">{vol_s}</span>'
+                                f'<span class="sc-sig">{sig}</span>'
+                                f'<span class="sc-lv">{lv_html}</span>'
+                                f'</div>'
+                            )
+                        st.markdown("".join(cards), unsafe_allow_html=True)
 
                         if missing_tickers:
                             st.caption(f"⚠️ 以下代碼未在市場資料中：{', '.join(missing_tickers)}")
@@ -2544,29 +2613,29 @@ def main():
                                 st.session_state["goto_ticker"] = sel_t
                                 st.info(f"請切換到「🔍 個股分析」Tab，已預選 {sel_t}")
 
-                    # 相關產業新聞
-                    st.markdown("---\n#### 📰 相關產業新聞")
-                    with st.spinner("載入產業新聞..."):
-                        try:
-                            news_analyzer = st.session_state.get("news_analyzer_obj")
-                            if news_analyzer is None:
-                                news_analyzer = NewsAnalyzer()
-                                st.session_state["news_analyzer_obj"] = news_analyzer
-                            events = news_analyzer.fetch_industry_events(supply_chain=sc_key)
-                            if events:
-                                for ev in events[:6]:
-                                    pub = ev.get("published", "")[:10]
-                                    cat = ev.get("category", "")
-                                    title = ev.get("title", "")
-                                    link  = ev.get("link", "")
-                                    if link:
-                                        st.markdown(f"- [{title}]({link}) `{cat}` {pub}")
-                                    else:
-                                        st.markdown(f"- {title} `{cat}` {pub}")
-                            else:
-                                st.caption("暫無相關產業新聞（需要網路連線）")
-                        except Exception:
-                            st.caption("產業新聞載入失敗")
+                    # 相關產業新聞（收合式 expander）
+                    with st.expander("📰 相關產業新聞（點擊展開）", expanded=False):
+                        with st.spinner("載入產業新聞..."):
+                            try:
+                                news_analyzer = st.session_state.get("news_analyzer_obj")
+                                if news_analyzer is None:
+                                    news_analyzer = NewsAnalyzer()
+                                    st.session_state["news_analyzer_obj"] = news_analyzer
+                                events = news_analyzer.fetch_industry_events(supply_chain=sc_key)
+                                if events:
+                                    for ev in events[:6]:
+                                        pub = ev.get("published", "")[:10]
+                                        cat = ev.get("category", "")
+                                        title = ev.get("title", "")
+                                        link  = ev.get("link", "")
+                                        if link:
+                                            st.markdown(f"- [{title}]({link}) `{cat}` {pub}")
+                                        else:
+                                            st.markdown(f"- {title} `{cat}` {pub}")
+                                else:
+                                    st.caption("暫無相關產業新聞（需要網路連線）")
+                            except Exception:
+                                st.caption("產業新聞載入失敗")
 
     # ========== Tab 8: 模型設定 ==========
     with tabs[8]:

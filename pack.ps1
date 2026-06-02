@@ -28,6 +28,9 @@ $include = @(
     "scripts\daily_report.py",
     "scripts\init_price_history.py",
     "scripts\run_model.py",
+    "scripts\update_architecture.py",
+    # ── 架構文件 ──
+    "architecture.html",
     # ── GitHub Actions ──
     ".github\workflows\daily_report.yml",
     # ── Streamlit 設定 ──
@@ -46,6 +49,10 @@ $include = @(
     "tw_quant_data\watchlist.json",
     "tw_quant_data\weights.json"
 )
+
+# 打包前自動更新架構文件
+Write-Host "更新 architecture.html..." -ForegroundColor Cyan
+& "$srcRoot\.venv\Scripts\python.exe" "$srcRoot\scripts\update_architecture.py"
 
 # 清理舊 zip
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
