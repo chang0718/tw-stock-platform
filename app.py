@@ -32,6 +32,7 @@ from config import (
     DEFAULT_WEIGHTS,
     DISPLAY_COLUMNS,
     NOTES_FILE,
+    SNAPSHOT_FILE,
     WATCHLIST_FILE,
     WEIGHT_LABELS,
     WEIGHTS_FILE,
@@ -117,6 +118,8 @@ def initialize_session_state():
         "us_market_ts":      0,
         # 持倉管理
         "portfolio":         Portfolio(),
+        # 每日快照（回測/調優用）
+        "snapshots":         read_json(SNAPSHOT_FILE, []),
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -2807,6 +2810,9 @@ def main():
                         if "notes" in restored:
                             st.session_state.notes = restored["notes"]
                             write_json(NOTES_FILE, restored["notes"])
+                        if "snapshots" in restored:
+                            st.session_state.snapshots = restored["snapshots"]
+                            write_json(SNAPSHOT_FILE, restored["snapshots"])
                         st.success("✅ 資料還原完成！")
                         st.rerun()
                 except Exception as e:
