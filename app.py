@@ -1686,7 +1686,6 @@ def main():
                             # ── 季度 EPS 進度追蹤 ─────────────────────────────
                             if "eps_yoy" in fin_df.columns:
                                 with st.expander("📊 季度 EPS 進度追蹤（今年 vs 去年同期）", expanded=True):
-                                    from collections import defaultdict
                                     _yr_eps: dict = defaultdict(list)
                                     for _, _qr in fin_df.iterrows():
                                         _qd = _qr.get("quarter", "")
