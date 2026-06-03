@@ -987,6 +987,38 @@ def main():
                 except Exception:
                     st.caption("新聞熱點載入失敗")
 
+            # ── 近三日資金流向預測 ─────────────────────────────────────
+            with st.expander("📊 近三日資金流向預測（新聞熱度 × 法人籌碼）", expanded=False):
+                try:
+                    _na2 = st.session_state.get("news_analyzer_obj") or NewsAnalyzer()
+                    st.session_state["news_analyzer_obj"] = _na2
+                    _inst_data = st.session_state.institutional_data.get("inst", {})
+                    _flow_sigs = _na2.get_fund_flow_signals(days=3, institutional_data=_inst_data)
+                    if _flow_sigs:
+                        _theme_colors = {
+                            "漲價受惠": "#ef5350", "缺貨缺料": "#ff9800",
+                            "AI需求爆發": "#1f6feb", "車用電動車": "#26a69a", "地緣政治": "#9c27b0",
+                        }
+                        for _fs in _flow_sigs:
+                            _fc1, _fc2, _fc3 = st.columns([2, 1, 2])
+                            _color = _theme_colors.get(_fs["theme"], "#888")
+                            _fc1.markdown(
+                                f'<span style="background:{_color}22;color:{_color};padding:2px 8px;border-radius:4px;font-size:13px">'
+                                f'{_fs["theme"]}</span>',
+                                unsafe_allow_html=True,
+                            )
+                            _fc2.markdown(f'{_fs["direction"]}')
+                            _flow_k = _fs.get("inst_flow_k", 0)
+                            _fc3.caption(
+                                f'新聞熱度 {_fs["heat_score"]}  |  '
+                                f'法人 {_flow_k:+.0f}K張  |  '
+                                + ("  ".join(_fs["tickers"][:3]) if _fs["tickers"] else "")
+                            )
+                    else:
+                        st.caption("需要市場資料 + 新聞連線才能計算資金流向")
+                except Exception:
+                    st.caption("資金流向分析載入失敗")
+
             # ── 市場概況摘要 ──────────────────────────────────────────
             sc_label = f" ({sc_category})" if sc_category != "全部產業" else ""
             st.markdown(f"### 📊 市場概況摘要{sc_label}")
@@ -1837,6 +1869,49 @@ def main():
                         _stop_reason = f"支撐失守（{_pstr(_stop)} 元）" if _stop else "技術破位"
                         st.error(f"🔴 **止損參考**：{_pstr(_stop)} 元  ｜  理由：{_stop_reason}")
 
+            # ── 蒙地卡羅 GBM 20 日股價模擬 ─────────────────────────────
+            if _ta_result and _ta_result.get("analysis"):
+                _ana_mc   = _ta_result["analysis"]
+                _atr_mc   = _ana_mc.get("atr")
+                _close_mc = _ana_mc.get("current_price") or stock.get("close")
+                if _close_mc and _close_mc > 0 and _atr_mc and _atr_mc > 0:
+                    _sigma_mc = (_atr_mc / _close_mc) * (252 ** 0.5)  # 年化波動率
+                    _mo_score = stock.get("momentum_score", 50) or 50
+                    _mu_mc    = (_mo_score - 50) / 50 * 0.3             # 動能轉年化漂移
+                    _mc_res   = QuantModel.monte_carlo_price(
+                        _close_mc, _sigma_mc, mu=_mu_mc, days=20, n_sim=800
+                    )
+                    if _mc_res:
+                        st.markdown("---")
+                        st.markdown("#### 🎲 蒙地卡羅模擬（20日）")
+                        st.caption(
+                            f"GBM 模型 800 路徑，年化波動率 {_mc_res['sigma_used']:.1f}%。"
+                            "歷史模擬，不代表未來報酬，不構成投資建議。"
+                        )
+                        _mc_c1, _mc_c2, _mc_c3, _mc_c4 = st.columns(4)
+                        _mc_c1.metric("上漲機率", f"{_mc_res['prob_up']:.1f}%")
+                        _mc_c2.metric("P10（悲觀）", f"{_mc_res['p10']:.1f}")
+                        _mc_c3.metric("P50（中位）", f"{_mc_res['p50']:.1f}",
+                                      delta=f"{_mc_res['expected_return']:+.1f}%")
+                        _mc_c4.metric("P90（樂觀）", f"{_mc_res['p90']:.1f}")
+
+                        # 簡單區間長條圖
+                        _mc_fig = go.Figure()
+                        _mc_fig.add_bar(
+                            x=["P10", "P25", "P50", "P75", "P90"],
+                            y=[_mc_res["p10"], _mc_res["p25"], _mc_res["p50"],
+                               _mc_res["p75"], _mc_res["p90"]],
+                            marker_color=["#ef5350", "#ff9800", "#1f6feb", "#4caf50", "#26a69a"],
+                        )
+                        _mc_fig.add_hline(y=_close_mc, line_dash="dash", line_color="gray",
+                                          annotation_text=f"現價 {_close_mc:.1f}")
+                        _mc_fig.update_layout(
+                            title="20日後股價分位數分布",
+                            height=250, margin=dict(t=40, b=20),
+                            showlegend=False,
+                        )
+                        st.plotly_chart(_mc_fig, use_container_width=True)
+
                 # ── 買入/賣出訊號 ──
                 st.markdown("---")
                 st.markdown("#### 🎯 買入/賣出訊號")
@@ -2219,6 +2294,74 @@ def main():
                     )
                 else:
                     st.info("⚠️ 載入中...")
+
+                # ── 財報更新 → 續抱評估 ─────────────────────────────────────
+                _wl_meta = st.session_state.watchlist.get(selected_wl, {})
+                _prev_eps = _wl_meta.get("last_seen_eps")
+                _prev_q   = _wl_meta.get("last_seen_quarter", "")
+                _fund_wl  = (st.session_state.watchlist_data.get(selected_wl, {}).get("fundamental")
+                             or st.session_state.stock_fundamentals.get(selected_wl) or {})
+                _curr_eps = _fund_wl.get("eps")
+                _curr_pe  = _fund_wl.get("pe")
+                _curr_gm  = _fund_wl.get("gross_margin")
+                _curr_yoy = _fund_wl.get("revenue_yoy")
+
+                if _curr_eps is not None:
+                    _eps_updated = (_prev_eps is not None and abs(_curr_eps - _prev_eps) > 0.01)
+                    if _eps_updated:
+                        st.warning(f"🆕 **財報更新偵測**：EPS 從 {_prev_eps:.2f} → {_curr_eps:.2f} 元（{_prev_q} 以來）")
+
+                    with st.expander("📋 續抱評估（點擊展開）", expanded=_eps_updated):
+                        if _prev_eps is not None and abs(_prev_eps) > 0.01:
+                            _eps_chg = (_curr_eps - _prev_eps) / abs(_prev_eps) * 100
+                        else:
+                            _eps_chg = None
+
+                        st.markdown(f"**目前 EPS：{_curr_eps:.2f} 元**")
+                        if _eps_chg is not None:
+                            st.metric("EPS 變化（vs 上次記錄）", f"{_curr_eps:.2f}",
+                                      delta=f"{_eps_chg:+.1f}%",
+                                      delta_color="normal" if _eps_chg > 0 else "inverse")
+
+                        if _curr_pe is not None:
+                            pe_lbl = "🏷️ 偏低" if _curr_pe < 15 else "🟡 合理" if _curr_pe < 25 else "🔴 偏高"
+                            st.write(f"PE：{_curr_pe:.1f}x — {pe_lbl}")
+                        if _curr_gm is not None:
+                            st.write(f"毛利率：{_curr_gm:.1f}%")
+                        if _curr_yoy is not None:
+                            st.write(f"月營收 YoY：{_curr_yoy:+.1f}%")
+
+                        # 簡單決策樹
+                        if _eps_chg is not None:
+                            if _eps_chg > 20 and (_curr_pe or 99) < 20:
+                                verdict = "🟢 建議：可續抱或考慮加碼，EPS 強勁成長且 PE 合理"
+                            elif _eps_chg > 5:
+                                verdict = "🟡 建議：可續抱，EPS 成長中，注意 PE 是否偏高"
+                            elif _eps_chg < -15 and (_curr_pe or 0) > 25:
+                                verdict = "🔴 建議：考慮減倉，EPS 衰退且估值偏高"
+                            elif _eps_chg < 0:
+                                verdict = "🟡 建議：觀察，EPS 小幅下降，追蹤下季確認趨勢"
+                            else:
+                                verdict = "⚪ 建議：持平觀望，EPS 變化不大"
+                        elif _curr_pe is not None:
+                            if _curr_pe < 12:
+                                verdict = "🟢 估值偏低，有安全邊際"
+                            elif _curr_pe > 30:
+                                verdict = "🟡 估值偏高，控制部位"
+                            else:
+                                verdict = "⚪ 估值合理，持續追蹤"
+                        else:
+                            verdict = "⚪ 資料不足，請載入基本面後評估"
+
+                        st.info(verdict)
+
+                        if st.button("✅ 更新基準（記錄目前 EPS）", key=f"update_eps_{selected_wl}"):
+                            st.session_state.watchlist[selected_wl]["last_seen_eps"] = _curr_eps
+                            st.session_state.watchlist[selected_wl]["last_seen_quarter"] = date.today().strftime("%Y-Q?")
+                            st.session_state.watchlist[selected_wl]["last_eval_date"] = date.today().isoformat()
+                            write_json(WATCHLIST_FILE, st.session_state.watchlist)
+                            st.success(f"✅ 已記錄 {selected_wl} EPS 基準：{_curr_eps:.2f}")
+                            st.rerun()
 
                 # 移除追蹤
                 if st.button(f"❌ 移除 {selected_wl} 的追蹤", key=f"rm_wl_{selected_wl}"):
@@ -2752,6 +2895,47 @@ def main():
                             except Exception:
                                 st.caption("產業新聞載入失敗")
 
+                    # ── 各領域基本面前三名 ────────────────────────────────────
+                    if not model_df.empty:
+                        st.markdown("---")
+                        st.markdown("##### ⭐ 本族群基本面前三名")
+                        _top3_cols = [c for c in ["gross_margin", "eps", "revenue_yoy"]
+                                      if c in model_df.columns]
+                        if _top3_cols and not sub_df.empty:
+                            _model_sub = model_df[model_df["ticker"].isin(sub_df["ticker"].tolist())]
+                            _top3_metric = _top3_cols[0]
+                            _top3 = QuantModel.top_by_group(
+                                _model_sub, group_col="group",
+                                metric=_top3_metric, top_n=3
+                            )
+                            if not _top3.empty:
+                                _t3c = st.columns(min(3, len(_top3)))
+                                for _ci, (_, _tr) in enumerate(list(_top3.iterrows())[:3]):
+                                    _t3_ticker = _tr.get("ticker", "")
+                                    _t3_name   = _tr.get("name", "")
+                                    _t3_val    = _tr.get(_top3_metric)
+                                    _label_map = {
+                                        "gross_margin": "毛利率%",
+                                        "eps": "EPS(元)",
+                                        "revenue_yoy": "營收YoY%",
+                                    }
+                                    with _t3c[_ci]:
+                                        st.markdown(f"**#{_ci+1} {_t3_ticker}**")
+                                        st.caption(_t3_name[:8])
+                                        st.metric(_label_map.get(_top3_metric, _top3_metric),
+                                                  f"{_t3_val:.1f}" if _t3_val else "--")
+                                        if _t3_ticker not in st.session_state.watchlist:
+                                            if st.button("⭐ 追蹤", key=f"t3_wl_{_t3_ticker}",
+                                                         use_container_width=True):
+                                                st.session_state.watchlist[_t3_ticker] = {
+                                                    "name": _t3_name,
+                                                    "added_date": date.today().isoformat(),
+                                                }
+                                                write_json(WATCHLIST_FILE, st.session_state.watchlist)
+                                                st.rerun()
+                                        else:
+                                            st.caption("✅ 已追蹤")
+
     # ========== Tab 8: 模型設定 ==========
     with tabs[7]:
         st.subheader("模型設定與權重")
@@ -3021,6 +3205,44 @@ def main():
                         if st.button("🔍 完整個股分析", key=f"catchup_goto_{ticker}_{rank}"):
                             st.session_state["goto_ticker"] = ticker
                             st.info(f"請切換到「🔍 個股分析」Tab，已預選 {ticker}")
+
+        # ── 跨年 EPS 超越排行前十名 ──────────────────────────────────────
+        st.markdown("---")
+        st.markdown("#### 📈 今年 EPS 進度超越去年全年 — 前十名")
+        st.caption("找出今年已公布季度的 EPS 累計，年化後超越去年全年 EPS 的股票（獲利爆發訊號）。")
+        with st.expander("展開 EPS 超越排行", expanded=True):
+            if model_df.empty:
+                st.info("請先載入市場資料")
+            else:
+                _fm_eps = FinMindLoader(token=st.session_state.get("finmind_token", ""))
+                _breakout_rows = []
+                _pool = model_df["ticker"].tolist()[:80]  # 限制 80 檔避免過慢
+                with st.spinner(f"分析 {len(_pool)} 檔 EPS 進度..."):
+                    for _t in _pool:
+                        _r = _fm_eps.get_eps_breakout(_t)
+                        if _r and _r.get("on_track_to_exceed"):
+                            _row = model_df[model_df["ticker"] == _t]
+                            _name = _row.iloc[0]["name"] if not _row.empty else ""
+                            _breakout_rows.append({
+                                "代號": _t,
+                                "名稱": _name,
+                                "去年全年EPS": _r["prev_full_year_eps"],
+                                "今年累計EPS": _r["ytd_eps"],
+                                f"已公布季數": _r["quarters_counted"],
+                                "年化進度%": round(_r["pace_ratio"] * 100, 1),
+                                "年化預估EPS": _r["annual_pace"],
+                                "狀態": "✅ 已超越" if _r["already_exceeded"] else "🔥 進度中",
+                            })
+
+                if _breakout_rows:
+                    _bdf = (pd.DataFrame(_breakout_rows)
+                            .sort_values("年化進度%", ascending=False)
+                            .head(10)
+                            .reset_index(drop=True))
+                    st.dataframe(_bdf, use_container_width=True, hide_index=True)
+                    st.caption(f"⚠️ 分析前 {len(_pool)} 檔股票，找到 {len(_breakout_rows)} 檔符合條件，顯示前 10 名。")
+                else:
+                    st.info("目前追蹤清單股票中，尚無今年 EPS 進度明顯超越去年的標的（可能資料不足）。")
 
     # ========== Tab 10: ETF 排行 ==========
     with tabs[9]:
