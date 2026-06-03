@@ -695,3 +695,83 @@ class QuantModel:
             .sort_values("heat_index", ascending=False)
             .reset_index(drop=True)
         )
+
+    # ── 各族群基本面前 N 名 ────────────────────────────────────────────
+
+    @staticmethod
+    def top_by_group(
+        df: pd.DataFrame,
+        group_col: str = "group",
+        metric: str = "gross_margin",
+        top_n: int = 3,
+    ) -> pd.DataFrame:
+        """
+        各族群依 metric 取前 top_n 名，回傳含 group/rank/ticker/name/metric 欄位。
+        metric 為 None 或 NaN 的列自動排至末尾。
+        """
+        if df.empty or metric not in df.columns or group_col not in df.columns:
+            return pd.DataFrame()
+        rows = []
+        for grp, sub in df.groupby(group_col, sort=False):
+            valid = sub[pd.to_numeric(sub[metric], errors="coerce").notna()].copy()
+            valid["_m"] = pd.to_numeric(valid[metric], errors="coerce")
+            top = valid.nlargest(top_n, "_m")
+            for rank, (_, r) in enumerate(top.iterrows(), 1):
+                rows.append({
+                    "group":  grp,
+                    "rank":   rank,
+                    "ticker": r.get("ticker", ""),
+                    "name":   r.get("name", ""),
+                    metric:   r["_m"],
+                })
+        if not rows:
+            return pd.DataFrame()
+        return pd.DataFrame(rows).reset_index(drop=True)
+
+    # ── 蒙地卡羅 GBM 股價路徑模擬 ────────────────────────────────────
+
+    @staticmethod
+    def monte_carlo_price(
+        close: float,
+        sigma: float,
+        mu: float = 0.0,
+        days: int = 20,
+        n_sim: int = 1000,
+    ) -> Dict:
+        """
+        Geometric Brownian Motion 股價路徑模擬（Geometric Brownian Motion）。
+        學術依據：Black-Scholes (1973) GBM 股價過程假設。
+
+        Args:
+            close:  現價
+            sigma:  年化波動率（小數，如 0.35 = 35%）
+            mu:     年化期望報酬（小數，預設 0）
+            days:   模擬天數
+            n_sim:  模擬路徑數
+
+        Returns: {p10, p25, p50, p75, p90, prob_up, expected_return,
+                  range_label, sigma_used}
+        """
+        if close <= 0 or sigma <= 0:
+            return {}
+        dt = 1 / 252
+        rng = np.random.default_rng()
+        Z = rng.standard_normal((n_sim, days))
+        log_returns = (mu - 0.5 * sigma ** 2) * dt + sigma * np.sqrt(dt) * Z
+        paths = close * np.exp(np.cumsum(log_returns, axis=1))
+        final = paths[:, -1]
+        p10, p25, p50, p75, p90 = np.percentile(final, [10, 25, 50, 75, 90])
+        prob_up = float((final > close).mean() * 100)
+        exp_ret = float((p50 - close) / close * 100)
+        return {
+            "p10":             round(float(p10), 2),
+            "p25":             round(float(p25), 2),
+            "p50":             round(float(p50), 2),
+            "p75":             round(float(p75), 2),
+            "p90":             round(float(p90), 2),
+            "prob_up":         round(prob_up, 1),
+            "expected_return": round(exp_ret, 2),
+            "sigma_used":      round(sigma * 100, 1),
+            "days":            days,
+            "n_sim":           n_sim,
+        }

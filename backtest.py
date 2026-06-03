@@ -557,3 +557,65 @@ class BacktestEngine:
             "avg_bias": avg_bias,
             "note": note,
         }
+
+    def bootstrap_model_confidence(
+        self, ticker: str = None, horizon: int = 20, n_boot: int = 500
+    ) -> Dict:
+        """
+        以 Bootstrap 有放回抽樣估算命中率的 95% 信賴區間。
+        學術依據：Efron & Tibshirani (1993) bootstrap resampling。
+
+        Args:
+            ticker:   指定股票代號（None = 全市場）
+            horizon:  預測天數（5/20/60）
+            n_boot:   抽樣次數
+
+        Returns: {hit_rate, ci_low, ci_high, n_samples, note}
+        """
+        if len(self.snapshots) < 5:
+            return {"error": "快照數不足（需 ≥ 5）"}
+
+        # 蒐集所有 (predicted_prob, actual_up) 樣本
+        samples = []
+        for i in range(len(self.snapshots) - 1):
+            cur = self.snapshots[i]
+            fut = self.snapshots[i + 1] if i + 1 < len(self.snapshots) else None
+            if fut is None:
+                continue
+            cur_stocks  = {s["ticker"]: s for s in cur.get("stocks", []) if "ticker" in s}
+            fut_stocks  = {s["ticker"]: s for s in fut.get("stocks", []) if "ticker" in s}
+            tickers = [ticker] if ticker else list(cur_stocks.keys())
+            for t in tickers:
+                cs = cur_stocks.get(t)
+                fs = fut_stocks.get(t)
+                if cs and fs:
+                    prob = to_number(cs.get("prob_up_20d", cs.get("prob_up")))
+                    cp = to_number(cs.get("close"))
+                    fp = to_number(fs.get("close"))
+                    if prob is not None and cp and fp:
+                        samples.append((prob / 100, int(fp > cp)))
+
+        if len(samples) < 10:
+            return {"error": f"有效樣本不足（{len(samples)} 筆，需 ≥ 10）"}
+
+        probs = np.array([s[0] for s in samples])
+        actuals = np.array([s[1] for s in samples])
+        overall_hit = float(actuals.mean() * 100)
+
+        rng = np.random.default_rng(42)
+        boot_hits = []
+        n = len(samples)
+        for _ in range(n_boot):
+            idx = rng.integers(0, n, size=n)
+            boot_hits.append(actuals[idx].mean() * 100)
+        boot_hits = np.array(boot_hits)
+        ci_low  = float(np.percentile(boot_hits, 2.5))
+        ci_high = float(np.percentile(boot_hits, 97.5))
+
+        return {
+            "hit_rate":  round(overall_hit, 1),
+            "ci_low":    round(ci_low, 1),
+            "ci_high":   round(ci_high, 1),
+            "n_samples": n,
+            "note": f"命中率 {overall_hit:.1f}%（95% CI: {ci_low:.1f}%–{ci_high:.1f}%），樣本數 {n}",
+        }

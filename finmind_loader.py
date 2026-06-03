@@ -334,11 +334,21 @@ class FinMindLoader:
             if prev_yr_ym in ym_rev and ym_rev[prev_yr_ym]:
                 yoy = round((curr_rev - ym_rev[prev_yr_ym]) / abs(ym_rev[prev_yr_ym]) * 100, 2)
 
+            # YTD YoY：今年 Jan–目前月累計 vs 去年同期累計
+            yr2, mo2 = int(curr_ym[:4]), int(curr_ym[5:7])
+            ytd_curr = sum(ym_rev.get(f"{yr2:04d}-{m:02d}", 0) for m in range(1, mo2 + 1))
+            ytd_prev_val = sum(ym_rev.get(f"{yr2-1:04d}-{m:02d}", 0) for m in range(1, mo2 + 1))
+            prev_months_cnt = sum(1 for m in range(1, mo2 + 1) if f"{yr2-1:04d}-{m:02d}" in ym_rev)
+            ytd_yoy = None
+            if ytd_prev_val > 0 and prev_months_cnt == mo2:
+                ytd_yoy = round((ytd_curr - ytd_prev_val) / ytd_prev_val * 100, 2)
+
             result.append({
-                "month":   curr_ym,
-                "revenue": int(curr_rev),
-                "yoy_pct": yoy,
-                "mom_pct": mom,
+                "month":       curr_ym,
+                "revenue":     int(curr_rev),
+                "yoy_pct":     yoy,
+                "mom_pct":     mom,
+                "ytd_yoy_pct": ytd_yoy,
             })
 
         out = result[-months:]
@@ -378,7 +388,16 @@ class FinMindLoader:
                     "eps":          eps,
                     "gross_margin": gm,
                     "net_margin":   nm,
+                    "eps_qoq":      None,
+                    "gm_qoq":       None,
                 })
+            # QoQ（季環比）：與前一季比較
+            for i in range(1, len(result)):
+                cur = result[i]; prv = result[i - 1]
+                if cur["eps"] is not None and prv["eps"] is not None and prv["eps"] != 0:
+                    cur["eps_qoq"] = round((cur["eps"] - prv["eps"]) / abs(prv["eps"]) * 100, 2)
+                if cur["gross_margin"] is not None and prv["gross_margin"] is not None:
+                    cur["gm_qoq"] = round(cur["gross_margin"] - prv["gross_margin"], 2)
             out = result[-quarters:]
             self._put(key, out)
             return out
@@ -495,9 +514,13 @@ class FinMindLoader:
         fund  = self.get_fundamental(ticker)
         eps   = fund.get("eps")
 
-        empty = {"fair_low": None, "fair_mid": None, "fair_high": None,
-                 "pe_25": None, "pe_50": None, "pe_75": None,
-                 "eps": eps, "has_data": False}
+        empty = {
+            "fair_low": None, "fair_mid": None, "fair_high": None,
+            "fair_growth": None,
+            "pe_25": None, "pe_50": None, "pe_75": None,
+            "eps": eps, "has_data": False,
+            "eps_growth_rate": None, "gm_trend": None, "pe_growth_adj": None,
+        }
 
         if not trend or eps is None or eps <= 0:
             return empty
@@ -511,15 +534,94 @@ class FinMindLoader:
         pe_50 = pe_hist[int(n * 0.50)]
         pe_75 = pe_hist[int(n * 0.75)]
 
-        return {
+        result = {
             "fair_low":  round(pe_25 * eps, 2),
             "fair_mid":  round(pe_50 * eps, 2),
             "fair_high": round(pe_75 * eps, 2),
+            "fair_growth": None,
             "pe_25":     round(pe_25, 1),
             "pe_50":     round(pe_50, 1),
             "pe_75":     round(pe_75, 1),
             "eps":       eps,
             "has_data":  True,
+            "eps_growth_rate": None, "gm_trend": None, "pe_growth_adj": None,
+        }
+
+        # PEG 成長調整目標價：近四季 EPS 成長率 × 毛利率趨勢溢價
+        fin_trend = self.get_financial_trend(ticker, quarters=10)
+        valid_q = [(r["eps"], r["gross_margin"]) for r in fin_trend
+                   if r.get("eps") is not None]
+        if len(valid_q) >= 8:
+            recent_eps = [e for e, _ in valid_q[-4:]]
+            prior_eps  = [e for e, _ in valid_q[-8:-4]]
+            recent_gm  = [g for _, g in valid_q[-4:] if g is not None]
+            prior_gm   = [g for _, g in valid_q[-8:-4] if g is not None]
+            recent_sum = sum(recent_eps); prior_sum = sum(prior_eps)
+            eps_gr = None
+            if prior_sum and prior_sum != 0:
+                eps_gr = (recent_sum - prior_sum) / abs(prior_sum)
+            gm_tr = None
+            if recent_gm and prior_gm:
+                gm_tr = round(sum(recent_gm)/len(recent_gm) - sum(prior_gm)/len(prior_gm), 2)
+            if eps_gr is not None:
+                growth_adj = max(-0.30, min(0.50, eps_gr))
+                gm_adj = 1 + max(-0.10, min(0.20, (gm_tr or 0) / 100))
+                pe_growth_adj = round(pe_50 * (1 + growth_adj), 1)
+                result.update({
+                    "fair_growth":    round(pe_growth_adj * eps * gm_adj, 2),
+                    "eps_growth_rate": round(eps_gr * 100, 1),
+                    "gm_trend":       gm_tr,
+                    "pe_growth_adj":  pe_growth_adj,
+                })
+        return result
+
+    def get_eps_breakout(self, ticker: str) -> Dict:
+        """
+        今年 YTD 累計 EPS 是否已接近/超越去年全年 EPS（爆發訊號）。
+        回傳: {prev_full_year_eps, ytd_eps, quarters_counted, pace_ratio,
+               annual_pace, on_track_to_exceed, already_exceeded, prev_year, curr_year}
+        """
+        fin_trend = self.get_financial_trend(ticker, quarters=12)
+        if len(fin_trend) < 5:
+            return {}
+
+        from collections import defaultdict
+        year_eps: dict = defaultdict(list)
+        for q in fin_trend:
+            qdate = q.get("quarter", "")
+            eps = q.get("eps")
+            if len(qdate) >= 4 and eps is not None:
+                year_eps[int(qdate[:4])].append(eps)
+
+        if not year_eps:
+            return {}
+        curr_year = max(year_eps.keys())
+        prev_year = curr_year - 1
+        if prev_year not in year_eps or len(year_eps[prev_year]) < 4:
+            return {}
+
+        curr_quarters = year_eps[curr_year]
+        prev_quarters = year_eps[prev_year]
+        if not curr_quarters:
+            return {}
+
+        prev_full = sum(prev_quarters)
+        ytd_eps   = sum(curr_quarters)
+        q_cnt     = len(curr_quarters)
+        if prev_full == 0:
+            return {}
+
+        annual_pace = ytd_eps * (4 / q_cnt)
+        return {
+            "prev_full_year_eps": round(prev_full, 2),
+            "ytd_eps":            round(ytd_eps, 2),
+            "quarters_counted":   q_cnt,
+            "pace_ratio":         round(ytd_eps / prev_full, 3),
+            "annual_pace":        round(annual_pace, 2),
+            "on_track_to_exceed": annual_pace >= prev_full,
+            "already_exceeded":   ytd_eps >= prev_full,
+            "prev_year":          prev_year,
+            "curr_year":          curr_year,
         }
 
     def get_price_history(self, ticker: str, days: int = 120) -> Optional[pd.DataFrame]:

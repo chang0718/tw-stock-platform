@@ -548,3 +548,118 @@ class NewsAnalyzer:
         self._cache[key] = {"ts": time.time(), "data": results, "ttl": 7200}
         self._flush()
         return results
+
+    def get_theme_heat(self, days: int = 3) -> List[Dict]:
+        """
+        近 N 日各漲價/題材主題熱度，回傳：
+        [{theme, count, heat_score(0-100), headlines, keywords_matched}]
+        快取 2 小時
+        """
+        cache_key = f"theme_heat:{days}"
+        cached = self._hit(cache_key)
+        if cached is not None:
+            return cached
+
+        from config import PRICE_THEMES
+
+        all_events = self.fetch_industry_events()
+        cutoff = datetime.now() - timedelta(days=days)
+        recent = [
+            ev for ev in all_events
+            if datetime.fromisoformat(ev.get("pub_date", "2000-01-01")[:19]) >= cutoff
+        ] if all_events else []
+
+        all_news_text = " ".join(
+            ev.get("title", "") + " " + ev.get("summary", "")
+            for ev in (recent or all_events)
+        )
+
+        results = []
+        for theme, keywords in PRICE_THEMES.items():
+            matched_kws = [kw for kw in keywords if kw in all_news_text]
+            headlines = [
+                ev["title"] for ev in (recent or all_events)
+                if any(kw in ev.get("title", "") for kw in keywords)
+            ][:3]
+            count = len(headlines) + len(matched_kws)
+            heat_score = min(100, count * 12)
+            if count > 0:
+                results.append({
+                    "theme":            theme,
+                    "count":            count,
+                    "heat_score":       heat_score,
+                    "headlines":        headlines,
+                    "keywords_matched": matched_kws,
+                })
+
+        results.sort(key=lambda x: x["heat_score"], reverse=True)
+        self._cache[cache_key] = {"ts": time.time(), "data": results, "ttl": 7200}
+        self._flush()
+        return results
+
+    def get_fund_flow_signals(
+        self, days: int = 3, institutional_data: Optional[Dict] = None
+    ) -> List[Dict]:
+        """
+        近 N 日新聞題材熱度 × 法人籌碼 → 資金流向方向預測。
+        回傳：[{theme, heat_score, inst_flow_k(千張), direction, tickers, headlines}]
+
+        Args:
+            days:               近幾日新聞
+            institutional_data: st.session_state.institutional_data["inst"]
+                                格式：{ticker: {foreign_net, trust_net, ...}}
+        """
+        from config import PRICE_THEMES, CONCEPT_STOCKS, SUPPLY_CHAIN_TREE
+
+        theme_heat = self.get_theme_heat(days=days)
+        inst = institutional_data or {}
+
+        # 建立供應鏈/概念股 → tickers 的映射（用於找對應法人流向）
+        theme_tickers: Dict[str, List[str]] = {}
+        for theme in PRICE_THEMES:
+            theme_tickers[theme] = []
+
+        # AI需求爆發 → AI/伺服器概念股
+        if "AI需求爆發" in theme_tickers and "AI／伺服器供應鏈" in CONCEPT_STOCKS:
+            theme_tickers["AI需求爆發"] = CONCEPT_STOCKS["AI／伺服器供應鏈"][:8]
+        if "車用電動車" in theme_tickers:
+            for key in CONCEPT_STOCKS:
+                if "電動車" in key:
+                    theme_tickers["車用電動車"] = CONCEPT_STOCKS[key][:8]
+                    break
+
+        results = []
+        for th in theme_heat:
+            theme = th["theme"]
+            heat = th["heat_score"]
+            tickers = theme_tickers.get(theme, [])
+
+            # 計算成分股的外資+投信淨買超合計（千張）
+            inst_flow = 0
+            valid_tickers = []
+            for t in tickers:
+                td = inst.get(t, {})
+                fn = td.get("foreign_net", 0) or 0
+                tn = td.get("trust_net", 0) or 0
+                inst_flow += (fn + tn)
+                if fn != 0 or tn != 0:
+                    valid_tickers.append(t)
+
+            # 判斷方向
+            if heat >= 60 and inst_flow > 0:
+                direction = "🟢 資金流入"
+            elif heat < 30 or inst_flow < -500:
+                direction = "🔴 資金流出"
+            else:
+                direction = "🟡 觀望"
+
+            results.append({
+                "theme":       theme,
+                "heat_score":  heat,
+                "inst_flow_k": round(inst_flow / 1000, 1) if inst_flow else 0,
+                "direction":   direction,
+                "tickers":     valid_tickers[:3],
+                "headlines":   th.get("headlines", [])[:2],
+            })
+
+        return results
