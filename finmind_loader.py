@@ -226,7 +226,14 @@ class FinMindLoader:
                 )
                 if not pv.empty:
                     last = pv.iloc[-1]
-                    out["eps"] = _f(last.get("EPS"))
+                    # EPS：改用近四季合計（TTM），而非最新單季
+                    if "EPS" in pv.columns:
+                        eps_series = pv["EPS"].dropna()
+                        if len(eps_series) >= 4:
+                            out["eps"] = round(float(eps_series.iloc[-4:].sum()), 2)  # TTM
+                        elif len(eps_series) > 0:
+                            out["eps"] = _f(eps_series.iloc[-1])
+                    # 毛利率 / 淨利率：取最新一季
                     gp = _f(last.get("GrossProfit"))
                     rv = _f(last.get("Revenue"))
                     if gp is not None and rv:
@@ -234,12 +241,16 @@ class FinMindLoader:
                     ni = _f(last.get("NetIncome"))
                     if ni is not None and rv:
                         out["net_margin"] = round(ni / rv * 100, 2)
-                    if len(pv) >= 5 and out["eps"] is not None:
-                        y = _f(pv.iloc[-5].get("EPS"))
-                        if y and y != 0:
-                            out["eps_growth_yoy"] = round(
-                                (out["eps"] - y) / abs(y) * 100, 2
-                            )
+                    # EPS YoY：近四季 TTM vs 前四季 TTM（日期比對，不用位置索引）
+                    if "EPS" in pv.columns:
+                        eps_s = pv["EPS"].dropna()
+                        if len(eps_s) >= 8:
+                            ttm_now  = float(eps_s.iloc[-4:].sum())
+                            ttm_prev = float(eps_s.iloc[-8:-4].sum())
+                            if ttm_prev and ttm_prev != 0:
+                                out["eps_growth_yoy"] = round(
+                                    (ttm_now - ttm_prev) / abs(ttm_prev) * 100, 2
+                                )
                     has = True
             except Exception:
                 pass
@@ -280,6 +291,17 @@ class FinMindLoader:
             if rev:
                 out.update(rev)
                 out["data_source"] = "✅ Yahoo Finance + FinMind月營收"
+            # 補充 eps_growth_yoy（yfinance 不提供，用 FinMind 季報計算 TTM YoY）
+            if out.get("eps_growth_yoy") is None:
+                fin = self.get_financial_trend(ticker, quarters=8)
+                eps_valid = [r["eps"] for r in fin if r.get("eps") is not None]
+                if len(eps_valid) >= 8:
+                    ttm_now  = sum(eps_valid[-4:])
+                    ttm_prev = sum(eps_valid[-8:-4])
+                    if ttm_prev and ttm_prev != 0:
+                        out["eps_growth_yoy"] = round(
+                            (ttm_now - ttm_prev) / abs(ttm_prev) * 100, 2
+                        )
             self._put(key, out)
             return out
 
@@ -390,6 +412,7 @@ class FinMindLoader:
                     "net_margin":   nm,
                     "eps_qoq":      None,
                     "gm_qoq":       None,
+                    "eps_yoy":      None,  # 去年同季比較
                 })
             # QoQ（季環比）：與前一季比較
             for i in range(1, len(result)):
@@ -398,6 +421,17 @@ class FinMindLoader:
                     cur["eps_qoq"] = round((cur["eps"] - prv["eps"]) / abs(prv["eps"]) * 100, 2)
                 if cur["gross_margin"] is not None and prv["gross_margin"] is not None:
                     cur["gm_qoq"] = round(cur["gross_margin"] - prv["gross_margin"], 2)
+            # YoY（同季年比）：日期比對，找去年同季
+            q_eps_map = {r["quarter"]: r["eps"] for r in result if r["eps"] is not None}
+            for r in result:
+                if r["eps"] is None:
+                    continue
+                ym = r["quarter"]  # e.g. "2026-03"
+                yr2, mo2 = int(ym[:4]), int(ym[5:7])
+                prev_ym2 = f"{yr2 - 1:04d}-{mo2:02d}"
+                prev_eps2 = q_eps_map.get(prev_ym2)
+                if prev_eps2 is not None and abs(prev_eps2) > 0.001:
+                    r["eps_yoy"] = round((r["eps"] - prev_eps2) / abs(prev_eps2) * 100, 2)
             out = result[-quarters:]
             self._put(key, out)
             return out
@@ -623,6 +657,63 @@ class FinMindLoader:
             "prev_year":          prev_year,
             "curr_year":          curr_year,
         }
+
+    def get_institutional_trend(self, ticker: str, days: int = 20) -> List[Dict]:
+        """
+        個股近 N 交易日三大法人每日買賣超（FinMind TaiwanStockInstitutionalInvestorsBuySell）。
+        回傳: [{date, foreign_net, trust_net, dealer_net}]，按日期升序排列。
+        快取 1 天。需要 FinMind token。
+        """
+        key = f"inst_trend:{ticker}:{days}"
+        e = self._cache.get(key)
+        if e and (time.time() - e.get("ts", 0)) < 86400:
+            return e["data"]
+
+        start = (datetime.now() - timedelta(days=days * 2)).strftime("%Y-%m-%d")
+        rows = self._api("TaiwanStockInstitutionalInvestorsBuySell", ticker, start)
+        if not rows:
+            return []
+
+        try:
+            df = pd.DataFrame(rows)
+            if df.empty or "name" not in df.columns:
+                return []
+
+            # 只取三大法人欄位，pivot by date + name
+            # 欄位：date, stock_id, name, buy, sell, diff (= buy-sell 差)
+            df["date"] = df["date"].astype(str).str[:10]
+            df["diff"] = pd.to_numeric(df.get("diff", pd.Series([0]*len(df))), errors="coerce").fillna(0)
+
+            name_map = {
+                "外資":   "foreign_net",
+                "外陸資": "foreign_net",
+                "外資及陸資(不含外資自營商)": "foreign_net",
+                "投信":   "trust_net",
+                "自營商": "dealer_net",
+                "自營商(自行買賣)": "dealer_net",
+            }
+
+            date_data: dict = {}
+            for _, r in df.iterrows():
+                d = r["date"]
+                nm = str(r.get("name", ""))
+                col = name_map.get(nm)
+                if col is None:
+                    continue
+                if d not in date_data:
+                    date_data[d] = {"date": d, "foreign_net": 0, "trust_net": 0, "dealer_net": 0}
+                # 若同 name 多列，累加
+                date_data[d][col] += int(r["diff"])
+
+            result = sorted(date_data.values(), key=lambda x: x["date"])
+            # 只取最近 days 筆交易日
+            result = result[-days:]
+
+            self._cache[key] = {"ts": time.time(), "data": result}
+            self._flush()
+            return result
+        except Exception:
+            return []
 
     def get_price_history(self, ticker: str, days: int = 120) -> Optional[pd.DataFrame]:
         """

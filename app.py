@@ -475,18 +475,20 @@ def render_fundamental_block(fund: Dict):
             else:
                 col.metric(label, "N/A", help=help_txt)
 
-    _m(c1, "營收年增率",  fund.get("revenue_yoy"),
-       lambda v: f"{v:+.1f}%", "比去年同期多賣多少。正數=成長，負數=衰退")
-    _m(c2, "每股獲利 EPS", fund.get("eps"),
-       lambda v: f"${v:.2f}", "每一股票一年賺多少元。越高越好，負數代表虧損")
+    _rev_month = fund.get("latest_revenue_month", "")
+    _rev_label = f"營收年增率（{_rev_month}）" if _rev_month else "營收年增率"
+    _m(c1, _rev_label, fund.get("revenue_yoy"),
+       lambda v: f"{v:+.1f}%", f"最新月份（{_rev_month}）月營收 vs 去年同月比較。正數=成長，負數=衰退。")
+    _m(c2, "EPS（近四季 TTM）", fund.get("eps"),
+       lambda v: f"${v:.2f}", "近四季每股盈餘合計（TTM）。越高越好，負數代表虧損。用於計算 PE/公平價。")
     _m(c3, "本益比 PE",    fund.get("pe"),
        lambda v: f"{v:.1f}倍", "股價是每年獲利的幾倍。<15倍偏便宜；>30倍偏貴")
     _m(c4, "毛利率",       fund.get("gross_margin"),
        lambda v: f"{v:.1f}%", "扣掉直接成本後還剩多少比例。>30%不錯；>50%護城河強")
 
     c5, c6, c7, c8 = st.columns(4)
-    _m(c5, "EPS年增率",   fund.get("eps_growth_yoy"),
-       lambda v: f"{v:+.1f}%", "獲利比去年成長多少。持續為正代表公司持續賺更多")
+    _m(c5, "EPS年增率（TTM YoY）", fund.get("eps_growth_yoy"),
+       lambda v: f"{v:+.1f}%", "近四季合計 EPS vs 前四季合計 EPS 的增長率。正值=獲利成長，負值=衰退。")
     _m(c6, "淨利率",      fund.get("net_margin"),
        lambda v: f"{v:.1f}%",  "最終賺到的比例（扣掉所有費用後）。>10%算不錯")
     _m(c7, "股價淨值比",  fund.get("pb"),
@@ -616,17 +618,20 @@ def render_flow_block(stock: dict, show_reload: bool = False):
                     st.session_state.model_cache_key = ""
                 st.rerun()
         return
-    st.caption(f"資料來源: {src}")
+    _inst_date = stock.get("inst_date") or stock.get("date", "")
+    _date_hint = f"　日期：{_inst_date}" if _inst_date else ""
+    st.caption(f"資料來源：{src}{_date_hint}　｜　單位：張（= 千股 = 1,000 股）")
     c1, c2, c3 = st.columns(3)
     def _flow(col, label, val):
         with col:
             if val is not None:
-                col.metric(label, f"{val:+,} 千股")
+                col.metric(label, f"{val:+,} 張",
+                           help="正值=買超（法人在買進），負值=賣超（法人在賣出）。單位：張（1張=1,000股）。")
             else:
                 col.metric(label, "N/A")
-    _flow(c1, "外資買賣超", stock.get("foreign_net"))
-    _flow(c2, "投信買賣超", stock.get("trust_net"))
-    _flow(c3, "自營商買賣超", stock.get("dealer_net"))
+    _flow(c1, "外資今日買賣超", stock.get("foreign_net"))
+    _flow(c2, "投信今日買賣超", stock.get("trust_net"))
+    _flow(c3, "自營今日買賣超", stock.get("dealer_net"))
 
     c4, c5 = st.columns(2)
     with c4:
@@ -894,6 +899,7 @@ def main():
     _fk  = str(sorted(st.session_state.stock_fundamentals.keys()))
     _ck  = hashlib.md5(f"{_w}{_p}{_sz}{_fk}".encode()).hexdigest()[:8]
 
+    model = QuantModel(st.session_state.weights)  # 永遠先定義，避免快取路徑 UnboundLocalError
     if st.session_state.model_cache_key != _ck or st.session_state.model_df_cached.empty:
         with st.spinner("🧮 計算量化指標中..."):
             fund_data = {**st.session_state.stock_fundamentals}
@@ -910,7 +916,6 @@ def main():
                    and d["news"]["sentiment"].get("score") is not None
             }
             inst = st.session_state.institutional_data
-            model = QuantModel(st.session_state.weights)
             model_df = model.enrich_dataframe(
                 st.session_state.universe_df,
                 filters["preferred_groups"],
@@ -997,6 +1002,14 @@ def main():
                                                        use_container_width=True):
                                     st.session_state["sc_browser_type"] = "supply"
                                     st.session_state["sc_browser_key"]  = sc
+                                    st.session_state["tab7_mode"]        = "🏭 供應鏈"
+                                    # 直接寫入 pills 的 session state key，確保切換 Tab 後正確顯示
+                                    for _mj, _sb in SUPPLY_CHAIN_TREE.items():
+                                        if sc in _sb:
+                                            st.session_state["tab7_major_pill"] = _mj
+                                            _slug = _mj.split()[0]
+                                            st.session_state[f"tab7_sub_{_slug}"] = sc
+                                            break
                                     st.info(f"已選取「{sc}」，請切換到「📊 產業瀏覽器」Tab 查看")
                             if _headlines:
                                 st.caption(f"↳ {_headlines[0][:60]}…" if len(_headlines[0]) > 60 else f"↳ {_headlines[0]}")
@@ -1646,17 +1659,73 @@ def main():
                                 height=300, margin=dict(t=40, b=20),
                             )
                             st.plotly_chart(fig_fin, use_container_width=True)
-                            # 季報數字表
-                            tbl_fin = fin_df[["quarter", "eps", "gross_margin", "net_margin"]].copy()
-                            tbl_fin.columns = ["季度", "EPS(元)", "毛利率%", "淨利率%"]
+                            # 季報數字表（含 QoQ 季環比 + 同季 YoY）
+                            _fin_cols = ["quarter", "eps", "gross_margin", "net_margin"]
+                            _fin_names = ["季度", "EPS(元)", "毛利率%", "淨利率%"]
+                            if "eps_qoq" in fin_df.columns:
+                                _fin_cols += ["eps_qoq", "gm_qoq"]
+                                _fin_names += ["EPS季增%", "毛利率季差%pt"]
+                            if "eps_yoy" in fin_df.columns:
+                                _fin_cols.append("eps_yoy")
+                                _fin_names.append("EPS同季YoY%")
+                            tbl_fin = fin_df[_fin_cols].copy()
+                            tbl_fin.columns = _fin_names
                             for col in ["EPS(元)", "毛利率%", "淨利率%"]:
                                 tbl_fin[col] = tbl_fin[col].apply(
                                     lambda x: f"{x:.2f}" if pd.notna(x) else "--"
                                 )
+                            for col in [c for c in _fin_names if "%" in c and c not in ["毛利率%", "淨利率%"]]:
+                                tbl_fin[col] = tbl_fin[col].apply(
+                                    lambda x: f"{x:+.1f}%" if pd.notna(x) else "--"
+                                )
                             st.dataframe(
                                 tbl_fin.sort_values("季度", ascending=False).reset_index(drop=True),
-                                use_container_width=True, hide_index=True, height=220,
+                                use_container_width=True, hide_index=True, height=240,
                             )
+
+                            # ── 季度 EPS 進度追蹤 ─────────────────────────────
+                            if "eps_yoy" in fin_df.columns:
+                                with st.expander("📊 季度 EPS 進度追蹤（今年 vs 去年同期）", expanded=True):
+                                    from collections import defaultdict
+                                    _yr_eps: dict = defaultdict(list)
+                                    for _, _qr in fin_df.iterrows():
+                                        _qd = _qr.get("quarter", "")
+                                        _qe = _qr.get("eps")
+                                        if len(_qd) >= 4 and _qe is not None:
+                                            _yr_eps[int(_qd[:4])].append(_qe)
+                                    if _yr_eps:
+                                        _curr_yr = max(_yr_eps.keys())
+                                        _prev_yr = _curr_yr - 1
+                                        _curr_qtrs = _yr_eps.get(_curr_yr, [])
+                                        _prev_full = sum(_yr_eps.get(_prev_yr, []))
+                                        _curr_ytd  = sum(_curr_qtrs)
+                                        _q_cnt     = len(_curr_qtrs)
+                                        if _prev_full and _q_cnt:
+                                            _annual_pace = _curr_ytd * (4 / _q_cnt)
+                                            _pace_pct    = _curr_ytd / _prev_full * 100
+                                            _expected_pace = 100 * _q_cnt / 4
+                                            _pa1, _pa2, _pa3 = st.columns(3)
+                                            _pa1.metric(f"去年全年 EPS（{_prev_yr}）",
+                                                        f"{_prev_full:.2f} 元")
+                                            _pa2.metric(f"今年累計 EPS（{_curr_yr}，已公布 {_q_cnt} 季）",
+                                                        f"{_curr_ytd:.2f} 元",
+                                                        delta=f"年化預估 {_annual_pace:.1f} 元")
+                                            _flag = "🔥 超速" if _pace_pct > _expected_pace + 10 else (
+                                                    "✅ 正常" if _pace_pct >= _expected_pace else "⚠️ 落後")
+                                            _pa3.metric("完成去年全年進度",
+                                                        f"{_pace_pct:.1f}%",
+                                                        delta=f"預期進度 {_expected_pace:.0f}% {_flag}")
+                                        # 各季 vs 去年同季
+                                        _yoy_rows = fin_df[fin_df["eps_yoy"].notna()][
+                                            ["quarter", "eps", "eps_yoy"]
+                                        ].tail(6)
+                                        if not _yoy_rows.empty:
+                                            st.markdown("**各季與去年同季比較：**")
+                                            for _, _yr in _yoy_rows.sort_values("quarter", ascending=False).iterrows():
+                                                _yoy_v = _yr["eps_yoy"]
+                                                _color = "🟢" if _yoy_v > 20 else ("🟡" if _yoy_v >= 0 else "🔴")
+                                                st.write(f"{_color} `{_yr['quarter']}` EPS {_yr['eps']:.2f} 元　vs 去年同季 {_yoy_v:+.1f}%")
+                                    st.caption("⚠️ 季度 EPS 為財報公告值，不構成投資建議。投資前請自行評估風險。")
                         else:
                             st.info("⚠️ 無季報資料")
 
@@ -1950,10 +2019,49 @@ def main():
 
 
             with _stabs[2]:  # ── 籌碼（三大法人 + 融資融券）
-                # ── 籌碼 ──
-                st.markdown("---")
-                st.markdown("#### 💰 籌碼（TWSE 三大法人 + 融資融券）")
+                # ── 今日籌碼 ──
+                st.markdown("#### 💰 今日籌碼（TWSE 三大法人 + 融資融券）")
                 render_flow_block(stock.to_dict(), show_reload=True)
+
+                # ── 個股 20 日法人歷史趨勢（FinMind）─────────────────────
+                st.markdown("---")
+                st.markdown("#### 📈 三大法人每日買賣超（近 20 交易日）")
+                _fm_it = FinMindLoader(token=st.session_state.get("finmind_token", ""))
+                if st.session_state.get("finmind_token"):
+                    with st.spinner("載入法人歷史資料..."):
+                        _it = _fm_it.get_institutional_trend(selected_ticker, days=20)
+                    if _it:
+                        _it_df = pd.DataFrame(_it)
+                        # 柱狀圖
+                        _fig_it = go.Figure()
+                        _fig_it.add_bar(x=_it_df["date"], y=_it_df["foreign_net"],
+                                        name="外資(張)", marker_color="#1f6feb", opacity=0.85)
+                        _fig_it.add_bar(x=_it_df["date"], y=_it_df["trust_net"],
+                                        name="投信(張)", marker_color="#26a69a", opacity=0.85)
+                        _fig_it.add_bar(x=_it_df["date"], y=_it_df["dealer_net"],
+                                        name="自營(張)", marker_color="#ff9800", opacity=0.65)
+                        _fig_it.add_hline(y=0, line_color="gray", line_width=1)
+                        _fig_it.update_layout(
+                            barmode="group",
+                            title="近 20 交易日三大法人每日買賣超（張）",
+                            height=300, margin=dict(t=40, b=20),
+                            legend=dict(orientation="h", y=-0.2),
+                        )
+                        st.plotly_chart(_fig_it, use_container_width=True)
+                        # 累計統計
+                        _itp1, _itp2, _itp3 = st.columns(3)
+                        _itp1.metric("外資 20 日累計（張）",
+                                     f"{int(_it_df['foreign_net'].sum()):+,}",
+                                     help="正值代表法人累計買超；負值代表累計賣超。")
+                        _itp2.metric("投信 20 日累計（張）",
+                                     f"{int(_it_df['trust_net'].sum()):+,}")
+                        _itp3.metric("自營 20 日累計（張）",
+                                     f"{int(_it_df['dealer_net'].sum()):+,}")
+                        st.caption("資料來源：FinMind TaiwanStockInstitutionalInvestorsBuySell　單位：張（= 千股 = 1,000 股）")
+                    else:
+                        st.info("⚠️ 查無近期法人買賣資料（可能為近期無交易日或 FinMind 資料延遲）")
+                else:
+                    st.info("⚠️ 個股法人歷史趨勢需要 FinMind Token。請在「⚙️ 模型設定」Tab 填入免費 Token。")
 
 
             with _stabs[3]:  # ── 新聞/筆記/信號彙整
@@ -1993,15 +2101,16 @@ def main():
                     _news_d   = st.session_state.watchlist_data.get(selected_ticker, {}).get("news", {})
 
                     # 籌碼動向
-                    st.markdown("**三大法人今日淨買賣（千股）**")
-                    st.caption("正值=買超、負值=賣超。外資長線影響最大；投信買超通常帶動短中期動能；自營商多為短線避險。")
+                    _inst_dt = _inst_row.get("date", "")
+                    st.markdown(f"**三大法人今日淨買賣（張）**{'　' + _inst_dt if _inst_dt else ''}")
+                    st.caption("正值=買超、負值=賣超。1張=1,000股。外資長線影響最大；投信買超通常帶動短中期動能；自營商多為短線避險。")
                     ci1, ci2, ci3 = st.columns(3)
                     fn_v = int(_inst_row.get("foreign_net", 0) or 0)
                     tn_v = int(_inst_row.get("trust_net",   0) or 0)
                     dn_v = int(_inst_row.get("dealer_net",  0) or 0)
-                    ci1.metric("外資", f"{fn_v:+,}", help="外資今日淨買超（正=買超/負=賣超），單位千股。外資連續買超通常是多頭訊號。")
-                    ci2.metric("投信", f"{tn_v:+,}", help="投信（國內基金）今日淨買超，持續買超常帶動短中期行情。")
-                    ci3.metric("自營商", f"{dn_v:+,}", help="自營商今日淨買超，多為短線避險操作，參考性較低。")
+                    ci1.metric("外資", f"{fn_v:+,} 張", help="外資今日淨買超（正=買超/負=賣超），單位：張（= 千股）。外資連續買超通常是多頭訊號。")
+                    ci2.metric("投信", f"{tn_v:+,} 張", help="投信（國內基金）今日淨買超，持續買超常帶動短中期行情。")
+                    ci3.metric("自營商", f"{dn_v:+,} 張", help="自營商今日淨買超，多為短線避險操作，參考性較低。")
 
                     # 融資融券
                     if _marg_row:
