@@ -84,7 +84,7 @@ class TWSeInstitutionalLoader:
                 params["token"] = token
             resp = _req.get(
                 "https://api.finmindtrade.com/api/v4/data",
-                params=params, timeout=15,
+                params=params, timeout=(5, 10),
             )
             body = resp.json()
             if body.get("status") != 200:
@@ -124,8 +124,8 @@ class TWSeInstitutionalLoader:
         if cached is not None:
             return cached
 
-        # 往前找最近 7 個交易日（避開假日/非交易日）
-        for delta in range(7):
+        # 往前找最近 3 個交易日（法人資料最多延遲 1 天，不需要找 7 天）
+        for delta in range(3):
             dt = datetime.now() - timedelta(days=delta)
             if dt.weekday() >= 5:
                 continue
@@ -137,7 +137,7 @@ class TWSeInstitutionalLoader:
                         "date": self._roc(dt),
                         "selectType": "ALL",
                     },
-                    timeout=15,
+                    timeout=(5, 8),  # (connect_timeout, read_timeout)
                 )
                 r.raise_for_status()
                 body = r.json()
@@ -208,7 +208,7 @@ class TWSeInstitutionalLoader:
         if cached is not None:
             return cached
 
-        for delta in range(7):
+        for delta in range(3):
             dt = datetime.now() - timedelta(days=delta)
             if dt.weekday() >= 5:
                 continue
@@ -220,7 +220,7 @@ class TWSeInstitutionalLoader:
                         "date": self._roc(dt),
                         "selectType": "ALL",
                     },
-                    timeout=15,
+                    timeout=(5, 8),  # (connect_timeout, read_timeout)
                 )
                 r.raise_for_status()
                 body = r.json()

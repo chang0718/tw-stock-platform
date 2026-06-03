@@ -407,8 +407,8 @@ CACHE_CONFIG = {
 # ============================================================
 
 HTTP_CONFIG = {
-    "timeout": 20,
-    "retries": 3,
+    "timeout": 10,
+    "retries": 1,       # 重試 1 次即可，避免 3 次重試卡住 UI
     "backoff_factor": 0.3,
     "status_forcelist": (500, 502, 504),
 }

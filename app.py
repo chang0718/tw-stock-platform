@@ -185,22 +185,40 @@ def load_market_data_action(include_tpex: bool = True):
         else:
             st.warning(f"⚠️ 行情資料日期：{data_date}（前一交易日）｜TWSE 盤後資料通常於 17:00 後更新")
 
-    with st.spinner("📊 載入三大法人 / 融資融券..."):
+    with st.spinner("📊 載入三大法人 / 融資融券（最多 25 秒）..."):
+        import concurrent.futures as _cf
         inst_loader = TWSeInstitutionalLoader()
-        inst   = inst_loader.get_institutional_all(
-            finmind_token=st.session_state.get("finmind_token", "")
-        )
-        margin = inst_loader.get_margin_all()
+        token = st.session_state.get("finmind_token", "")
+
+        def _load_inst():
+            return inst_loader.get_institutional_all(finmind_token=token)
+
+        def _load_margin():
+            return inst_loader.get_margin_all()
+
+        inst = margin = {}
+        try:
+            with _cf.ThreadPoolExecutor(max_workers=2) as _ex:
+                _fi = _ex.submit(_load_inst)
+                _fm = _ex.submit(_load_margin)
+                # 各給 12 秒，總計不超過 25 秒
+                inst   = _fi.result(timeout=12) or {}
+                margin = _fm.result(timeout=12) or {}
+        except _cf.TimeoutError:
+            st.warning("⚠️ 三大法人 API 回應逾時（TWSE 伺服器繁忙），使用昨日快取或空值繼續")
+        except Exception as _e:
+            st.warning(f"⚠️ 三大法人載入失敗：{_e}")
+
         st.session_state.institutional_data = {
-            "inst":   inst   or {},
-            "margin": margin or {},
+            "inst":   inst,
+            "margin": margin,
         }
 
     n_inst = len(st.session_state.institutional_data["inst"])
     if n_inst:
         st.success(f"✅ 三大法人已載入（{n_inst} 檔）")
     else:
-        st.warning("⚠️ 三大法人暫時無法取得（非交易日或 API 異常）")
+        st.warning("⚠️ 三大法人暫時無法取得（非交易日、API 逾時或無資料）")
 
 
 def load_csv_action(uploaded_file):
