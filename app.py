@@ -650,6 +650,113 @@ def render_flow_block(stock: dict, show_reload: bool = False):
             c5.metric("融券餘額", "N/A")
 
 
+def render_health_check_block(fund: dict, fin_trend: list = None,
+                               val_pct: dict = None, epsfv: dict = None,
+                               compact: bool = False):
+    """
+    個股四維健檢儀表板（參考 winvest.tw 風格）。
+    compact=True 時只顯示分數條，不顯示詳細說明。
+    """
+    scores = QuantModel.health_check_score(fund, fin_trend, val_pct, epsfv)
+    if not fund or fund.get("data_type") == "NO_DATA":
+        st.caption("⚠️ 健檢需要基本面資料（請載入個股或填入 FinMind token）")
+        return
+
+    total = scores["total"]
+    verdict = scores["verdict"]
+    color   = scores["verdict_color"]
+
+    # ── 總評橫幅 ──────────────────────────────────────────────────
+    st.markdown(
+        f'<div style="background:{color}22;border-left:4px solid {color};'
+        f'padding:10px 16px;border-radius:6px;margin-bottom:12px;">'
+        f'<span style="font-size:20px;font-weight:700;color:{color}">{total:.0f} 分</span>'
+        f'&ensp;<span style="color:#e6edf3;font-size:15px">{verdict}</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── 四維進度條 ────────────────────────────────────────────────
+    dims = [
+        ("💰 獲利力", scores["profitability"],
+         "EPS / 毛利率 / 淨利率 / ROE 綜合評分"),
+        ("📈 成長力", scores["growth"],
+         "營收 YoY / EPS YoY / 最新季加速度"),
+        ("🎁 股利力", scores["dividend"],
+         "現金殖利率 / 配息可持續性"),
+        ("⚖️ 估 值", scores["valuation"],
+         "PE 歷史分位 / PB / 公平價估算"),
+    ]
+    _hc_cols = st.columns(4)
+    for col, (label, sc, tip) in zip(_hc_cols, dims):
+        with col:
+            _bar_color = "#26a69a" if sc >= 70 else ("#ff9800" if sc >= 45 else "#ef5350")
+            st.markdown(f"**{label}**")
+            st.markdown(
+                f'<div style="background:#30363d;border-radius:4px;height:8px;margin:4px 0 2px">'
+                f'<div style="background:{_bar_color};width:{sc}%;height:8px;border-radius:4px"></div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(f'<span style="font-size:18px;font-weight:700;color:{_bar_color}">{sc:.0f}</span>'
+                        f'<span style="font-size:12px;color:#8b949e"> / 100</span>',
+                        unsafe_allow_html=True)
+            if not compact:
+                st.caption(tip)
+
+    if compact:
+        return
+
+    # ── 雷達圖 ────────────────────────────────────────────────────
+    _categories = ["獲利力", "成長力", "股利力", "估值", "獲利力"]
+    _values = [scores["profitability"], scores["growth"],
+               scores["dividend"],      scores["valuation"],
+               scores["profitability"]]
+    _fig_radar = go.Figure(go.Scatterpolar(
+        r=_values, theta=_categories, fill="toself",
+        line_color="#1f6feb", fillcolor="rgba(31,111,235,0.25)",
+        name="健檢分數",
+    ))
+    _fig_radar.add_trace(go.Scatterpolar(
+        r=[70, 70, 70, 70, 70], theta=_categories,
+        mode="lines", line=dict(color="#ff9800", dash="dot", width=1),
+        name="良好基準線（70）",
+    ))
+    _fig_radar.update_layout(
+        polar=dict(
+            bgcolor="#161b22",
+            radialaxis=dict(visible=True, range=[0, 100], tickfont=dict(color="#8b949e")),
+            angularaxis=dict(tickfont=dict(color="#e6edf3")),
+        ),
+        paper_bgcolor="#0d1117",
+        showlegend=True,
+        height=320, margin=dict(t=20, b=20),
+        legend=dict(font=dict(color="#8b949e"), bgcolor="#0d1117"),
+    )
+    st.plotly_chart(_fig_radar, use_container_width=True)
+
+    # ── 加分明細（可展開）────────────────────────────────────────
+    if scores.get("details"):
+        with st.expander("📋 健檢評分明細", expanded=False):
+            _det = scores["details"]
+            _d1, _d2 = st.columns(2)
+            _profit_keys = [k for k in _det if k in ("EPS盈利", "毛利率", "淨利率", "ROE")]
+            _growth_keys = [k for k in _det if k in ("營收YoY", "EPS YoY", "季度加速")]
+            _div_keys    = [k for k in _det if k in ("殖利率", "盈利能力", "估值加成", "配息可持續")]
+            _val_keys    = [k for k in _det if k in ("PE分位", "PB", "公平價估值")]
+            with _d1:
+                st.markdown("**💰 獲利力**")
+                for k in _profit_keys: st.caption(f"• {k}：{_det[k]}")
+                st.markdown("**📈 成長力**")
+                for k in _growth_keys: st.caption(f"• {k}：{_det[k]}")
+            with _d2:
+                st.markdown("**🎁 股利力**")
+                for k in _div_keys: st.caption(f"• {k}：{_det[k]}")
+                st.markdown("**⚖️ 估值**")
+                for k in _val_keys: st.caption(f"• {k}：{_det[k]}")
+    st.caption("⚠️ 健檢評分為量化模型參考，不構成投資建議。請結合產業趨勢與個人風險承受度自行判斷。")
+
+
 def render_tech_block(ta: Dict, stock: Dict = None):
     """技術分析圖表（subplot 版）+ 文字摘要 + 購買信心指數"""
     if "error" in ta:
@@ -932,6 +1039,33 @@ def main():
             news_adj_series           = model_df["ticker"].apply(
                 lambda t: float(max(-5.0, min(5.0, sentiment_data.get(t, 0) * 5)))
             )
+            # 基本面品質加成（最高 +12）：EPS 成長 + 毛利率 + 營收 YoY + 淨利率
+            # 目的：讓 Top 10 推薦重視獲利品質，而非僅炒議題
+            def _fund_quality_bonus(ticker):
+                fd = fund_data.get(ticker, {})
+                if not fd or fd.get("data_type") == "NO_DATA":
+                    return 0.0
+                bonus = 0.0
+                eyoy = fd.get("eps_growth_yoy")
+                ryoy = fd.get("revenue_yoy")
+                gm   = fd.get("gross_margin")
+                nm   = fd.get("net_margin")
+                if eyoy is not None:
+                    if eyoy > 30: bonus += 4.0
+                    elif eyoy > 15: bonus += 2.5
+                    elif eyoy > 0:  bonus += 1.0
+                if ryoy is not None:
+                    if ryoy > 20: bonus += 3.0
+                    elif ryoy > 5:  bonus += 1.5
+                if gm is not None:
+                    if gm > 40: bonus += 2.5
+                    elif gm > 25: bonus += 1.0
+                if nm is not None and nm > 10:
+                    bonus += 2.5
+                return min(12.0, bonus)
+
+            fund_quality_series = model_df["ticker"].apply(_fund_quality_bonus)
+
             model_df["final_composite"] = (
                 model_df["prob20"]        * 0.40
                 + model_df["confidence"]  * 0.25
@@ -940,6 +1074,7 @@ def main():
                 + group_boost_series
                 + completeness_bonus_series
                 + news_adj_series
+                + fund_quality_series      # 基本面品質加成（+0~+12）
             ).round(2)
 
             st.session_state.model_df_cached = model_df
@@ -1580,25 +1715,38 @@ def main():
             _stabs = st.tabs(["📊 基本面", "📈 技術面", "🏦 籌碼", "💬 新聞/操作"])
 
             with _stabs[0]:  # ── 基本面（fund + 月季趨勢 + YTP + EPS 公平價）
-                # ── 基本面 ──
-                st.markdown("---")
-                st.markdown("#### 📊 基本面（Yahoo Finance 主力 / FinMind 補月營收）")
-
+                # ── 取得基本面資料 ──
                 fund_key = selected_ticker
                 if fund_key in st.session_state.stock_fundamentals:
-                    render_fundamental_block(st.session_state.stock_fundamentals[fund_key])
+                    _fund_data = st.session_state.stock_fundamentals[fund_key]
                 elif selected_ticker in st.session_state.watchlist_data and \
                         st.session_state.watchlist_data[selected_ticker].get("fundamental"):
-                    render_fundamental_block(
-                        st.session_state.watchlist_data[selected_ticker].get("fundamental", {})
-                    )
+                    _fund_data = st.session_state.watchlist_data[selected_ticker].get("fundamental", {})
                 else:
                     with st.spinner("📊 自動載入基本面（Yahoo Finance）..."):
                         fm = FinMindLoader(token=st.session_state.get("finmind_token", ""))
-                        fdata = fm.get_fundamental(selected_ticker)
-                        st.session_state.stock_fundamentals[selected_ticker] = fdata
+                        _fund_data = fm.get_fundamental(selected_ticker)
+                        st.session_state.stock_fundamentals[selected_ticker] = _fund_data
                         st.session_state.model_cache_key = ""
-                    render_fundamental_block(fdata)
+
+                # ── 🏥 健檢儀表板（winvest 風格四維評分）──────────────
+                st.markdown("#### 🏥 個股健檢儀表板")
+                _hc_fin  = st.session_state.get("tech_data", {}).get(f"fin_{selected_ticker}")
+                _hc_val  = None
+                _hc_epsfv = None
+                # 嘗試取得估值分位數（若快取有）
+                _cached_vp = st.session_state.get(f"_vp_{selected_ticker}")
+                _cached_ev = st.session_state.get(f"_ev_{selected_ticker}")
+                render_health_check_block(
+                    fund=_fund_data,
+                    fin_trend=None,
+                    val_pct=_cached_vp,
+                    epsfv=_cached_ev,
+                )
+
+                st.markdown("---")
+                st.markdown("#### 📊 基本面指標（Yahoo Finance 主力 / FinMind 補月營收）")
+                render_fundamental_block(_fund_data)
 
                 # ── 月/季趨勢 ──
                 if selected_ticker in st.session_state.stock_fundamentals:
@@ -1760,6 +1908,8 @@ def main():
                         fm_val = FinMindLoader(token=st.session_state.get("finmind_token", ""))
                         per_trend = fm_val.get_per_trend(selected_ticker, months=36)
                         val_pct   = fm_val.get_valuation_percentile(selected_ticker)
+                        # 快取供健檢儀表板使用
+                        st.session_state[f"_vp_{selected_ticker}"] = val_pct
 
                     if per_trend:
                         per_df = pd.DataFrame(per_trend)
@@ -1817,6 +1967,8 @@ def main():
                     st.markdown("#### 💡 EPS 公平價估算（歷史 PE 分位 × 近四季 EPS）")
                     fm_epsfv = FinMindLoader(token=st.session_state.get("finmind_token", ""))
                     epsfv = fm_epsfv.get_eps_fair_value(selected_ticker)
+                    # 快取供健檢儀表板使用
+                    st.session_state[f"_ev_{selected_ticker}"] = epsfv
                     if epsfv.get("has_data"):
                         curr_price = stock.get("close")
                         ev1, ev2, ev3 = st.columns(3)
@@ -2399,12 +2551,21 @@ def main():
                 wc4.metric("風險",     f"{wl_stock['risk_score']:.0f}")
                 wc5.metric("收盤價",   f"${wl_stock['close']:.2f}" if wl_stock.get('close') is not None else "--")
 
+                # 健檢儀表板（緊湊版）
+                _wl_fund = st.session_state.watchlist_data.get(selected_wl, {}).get("fundamental", {})
+                if _wl_fund:
+                    st.markdown("##### 🏥 個股健檢")
+                    render_health_check_block(
+                        fund=_wl_fund,
+                        val_pct=st.session_state.get(f"_vp_{selected_wl}"),
+                        epsfv=st.session_state.get(f"_ev_{selected_wl}"),
+                        compact=True,
+                    )
+
                 # 基本面
                 st.markdown("##### 📊 基本面")
                 if selected_wl in st.session_state.watchlist_data:
-                    render_fundamental_block(
-                        st.session_state.watchlist_data[selected_wl].get("fundamental", {})
-                    )
+                    render_fundamental_block(_wl_fund)
                 else:
                     st.info("⚠️ 載入中...")
 

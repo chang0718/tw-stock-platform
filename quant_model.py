@@ -775,3 +775,175 @@ class QuantModel:
             "days":            days,
             "n_sim":           n_sim,
         }
+
+    # ── 個股四維健檢評分 ─────────────────────────────────────────────
+
+    @staticmethod
+    def health_check_score(
+        fund: dict,
+        fin_trend: list = None,
+        val_pct: dict = None,
+        epsfv: dict = None,
+    ) -> dict:
+        """
+        個股四維健檢評分（0-100 各維度）。
+        類似 winvest.tw 的「獲利 / 成長 / 股利 / 估值」四象限。
+
+        Args:
+            fund:      get_fundamental() 回傳
+            fin_trend: get_financial_trend() 回傳
+            val_pct:   get_valuation_percentile() 回傳
+            epsfv:     get_eps_fair_value() 回傳
+
+        Returns: {profitability, growth, dividend, valuation, total,
+                  verdict, verdict_color, details}
+        """
+        f = fund or {}
+        fin = fin_trend or []
+        vp  = val_pct  or {}
+        ev  = epsfv    or {}
+        details: dict = {}
+
+        # ── 1. 獲利力（Profitability）────────────────────────────────
+        p_score = 0
+        eps = f.get("eps")
+        gm  = f.get("gross_margin")
+        nm  = f.get("net_margin")
+        roe = f.get("roe")
+
+        if eps is not None and eps > 0:
+            p_score += 30; details["EPS盈利"] = "+30（正獲利）"
+        elif eps is not None and eps <= 0:
+            p_score += 0;  details["EPS盈利"] = "0（虧損）"
+
+        if gm is not None:
+            if gm > 50:   p_score += 30; details["毛利率"] = f"+30（{gm:.1f}%，護城河）"
+            elif gm > 30: p_score += 20; details["毛利率"] = f"+20（{gm:.1f}%，優秀）"
+            elif gm > 20: p_score += 10; details["毛利率"] = f"+10（{gm:.1f}%，正常）"
+            elif gm > 0:  p_score += 5;  details["毛利率"] = f"+5（{gm:.1f}%，偏低）"
+
+        if nm is not None:
+            if nm > 15:   p_score += 25; details["淨利率"] = f"+25（{nm:.1f}%，卓越）"
+            elif nm > 10: p_score += 18; details["淨利率"] = f"+18（{nm:.1f}%，優秀）"
+            elif nm > 5:  p_score += 10; details["淨利率"] = f"+10（{nm:.1f}%，正常）"
+            elif nm > 0:  p_score += 5;  details["淨利率"] = f"+5（{nm:.1f}%，偏低）"
+
+        if roe is not None:
+            if roe > 20:   p_score += 15; details["ROE"] = f"+15（{roe:.1f}%，卓越）"
+            elif roe > 15: p_score += 10; details["ROE"] = f"+10（{roe:.1f}%，優秀）"
+            elif roe > 8:  p_score += 5;  details["ROE"] = f"+5（{roe:.1f}%）"
+
+        p_score = min(100, p_score)
+
+        # ── 2. 成長力（Growth）──────────────────────────────────────
+        g_score = 0
+        ryoy = f.get("revenue_yoy")
+        eyoy = f.get("eps_growth_yoy")
+
+        if ryoy is not None:
+            if ryoy > 30:  g_score += 35; details["營收YoY"] = f"+35（{ryoy:+.1f}%，爆發）"
+            elif ryoy > 15: g_score += 25; details["營收YoY"] = f"+25（{ryoy:+.1f}%，強勁）"
+            elif ryoy > 5:  g_score += 15; details["營收YoY"] = f"+15（{ryoy:+.1f}%，成長）"
+            elif ryoy > 0:  g_score += 5;  details["營收YoY"] = f"+5（{ryoy:+.1f}%，微增）"
+            else:           details["營收YoY"] = f"0（{ryoy:+.1f}%，衰退）"
+
+        if eyoy is not None:
+            if eyoy > 30:  g_score += 35; details["EPS YoY"] = f"+35（{eyoy:+.1f}%，爆發）"
+            elif eyoy > 15: g_score += 25; details["EPS YoY"] = f"+25（{eyoy:+.1f}%，強勁）"
+            elif eyoy > 5:  g_score += 15; details["EPS YoY"] = f"+15（{eyoy:+.1f}%，成長）"
+            elif eyoy > 0:  g_score += 5;  details["EPS YoY"] = f"+5（{eyoy:+.1f}%，微增）"
+            else:           details["EPS YoY"] = f"0（{eyoy:+.1f}%，衰退）"
+
+        # 加速度：最近一季 eps_yoy 是否存在且 > 0
+        if fin:
+            recent_eyoy = next(
+                (r.get("eps_yoy") for r in reversed(fin) if r.get("eps_yoy") is not None),
+                None
+            )
+            if recent_eyoy is not None and recent_eyoy > 20:
+                g_score += 20; details["季度加速"] = f"+20（最新季同比 {recent_eyoy:+.1f}%）"
+            elif recent_eyoy is not None and recent_eyoy > 0:
+                g_score += 10; details["季度加速"] = f"+10（最新季同比 {recent_eyoy:+.1f}%）"
+
+        g_score = min(100, g_score)
+
+        # ── 3. 股利力（Dividend）────────────────────────────────────
+        d_score = 0
+        dy = f.get("dividend_yield")
+        pe = f.get("pe")
+
+        if dy is not None and dy > 0:
+            if dy > 6:    d_score += 50; details["殖利率"] = f"+50（{dy:.1f}%，超高息）"
+            elif dy > 4:  d_score += 38; details["殖利率"] = f"+38（{dy:.1f}%，高息）"
+            elif dy > 2:  d_score += 22; details["殖利率"] = f"+22（{dy:.1f}%，普通）"
+            elif dy > 0:  d_score += 10; details["殖利率"] = f"+10（{dy:.1f}%，低息）"
+        else:
+            details["殖利率"] = "0（無配息資料）"
+
+        if eps is not None and eps > 0:
+            d_score += 25; details["盈利能力"] = "+25（正獲利，具配息潛力）"
+        if pe is not None and 0 < pe < 20:
+            d_score += 15; details["估值加成"] = f"+15（PE {pe:.1f}倍，低估值高息空間）"
+        if dy is not None and dy > 0 and eps is not None and eps > 0:
+            payout_proxy = dy * pe if pe else None
+            if payout_proxy and payout_proxy < 100:
+                d_score += 10; details["配息可持續"] = "+10（配息率估計合理）"
+
+        d_score = min(100, d_score)
+
+        # ── 4. 估值（Valuation）──────────────────────────────────────
+        v_score = 0
+        pe_pct = vp.get("pe_pct")
+        curr_price = f.get("close") or f.get("market_cap")  # 無 close，暫用 None
+
+        if pe_pct is not None:
+            if pe_pct < 25:   v_score += 40; details["PE分位"] = f"+40（歷史 {pe_pct:.0f}%，低估區）"
+            elif pe_pct < 50: v_score += 28; details["PE分位"] = f"+28（歷史 {pe_pct:.0f}%，合理偏低）"
+            elif pe_pct < 75: v_score += 12; details["PE分位"] = f"+12（歷史 {pe_pct:.0f}%，合理偏高）"
+            else:             details["PE分位"] = f"0（歷史 {pe_pct:.0f}%，高估區）"
+
+        pb = f.get("pb")
+        if pb is not None:
+            if pb < 1.5:  v_score += 25; details["PB"] = f"+25（{pb:.2f}倍，低淨值比）"
+            elif pb < 2.5: v_score += 15; details["PB"] = f"+15（{pb:.2f}倍，合理）"
+            elif pb < 4:  v_score += 5;  details["PB"] = f"+5（{pb:.2f}倍，偏高）"
+
+        if ev.get("has_data"):
+            fl = ev.get("fair_low"); fm = ev.get("fair_mid"); fh = ev.get("fair_high")
+            # 用 pe_pct 及 eps fair value 的合理價比較
+            if pe_pct is not None and pe_pct < 40:
+                v_score += 20; details["公平價估值"] = f"+20（PE在歷史低分位）"
+            elif pe_pct is not None and pe_pct < 60:
+                v_score += 10; details["公平價估值"] = f"+10（PE在歷史中段）"
+
+        v_score = min(100, v_score)
+
+        # ── 綜合 ────────────────────────────────────────────────────
+        # 若某維度無資料（分數 = 0），仍參與平均，但標記資料不足
+        has_data = bool(f and f.get("data_type") != "NO_DATA")
+        if not has_data:
+            return {"profitability": 0, "growth": 0, "dividend": 0, "valuation": 0,
+                    "total": 0, "verdict": "⚪ 無基本面資料", "verdict_color": "gray",
+                    "details": {}}
+
+        total = round((p_score + g_score + d_score + v_score) / 4, 1)
+
+        if total >= 75:
+            verdict, color = "🟢 基本面優良", "#26a69a"
+        elif total >= 55:
+            verdict, color = "🟡 基本面尚可", "#ff9800"
+        elif total >= 35:
+            verdict, color = "🟠 基本面偏弱", "#ef6c00"
+        else:
+            verdict, color = "🔴 基本面較差", "#ef5350"
+
+        return {
+            "profitability": p_score,
+            "growth":        g_score,
+            "dividend":      d_score,
+            "valuation":     v_score,
+            "total":         total,
+            "verdict":       verdict,
+            "verdict_color": color,
+            "details":       details,
+        }
