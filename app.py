@@ -735,25 +735,48 @@ def render_health_check_block(fund: dict, fin_trend: list = None,
     )
     st.plotly_chart(_fig_radar, use_container_width=True)
 
-    # ── 加分明細（可展開）────────────────────────────────────────
+    # ── 加分明細（可展開）+ 白話術語解說 ───────────────────────────
+    _TERM_EXPLAIN = {
+        "EPS盈利":    "每股盈餘（EPS）：公司每1股在過去12個月賺了多少錢。正值=獲利，負值=虧損，是最基本的獲利能力指標。",
+        "毛利率":     "毛利率：賣出商品扣除直接成本（原料、製造費）後剩的比例。越高代表定價能力越強。>30%算優秀，>50%代表強護城河。",
+        "淨利率":     "淨利率：扣掉所有費用（管銷、研發、稅等）後，最終賺到的比例。>10%不錯，>15%卓越，<5%要留意費用控制。",
+        "ROE":        "股東權益報酬率（ROE）：公司用股東投入的錢賺了多少，衡量管理效率。>15%代表高效，<8%代表資本運用偏差。",
+        "營收YoY":   "月營收年增率：和去年同月相比，銷售額成長或衰退多少（%）。持續正成長是好訊號，衰退需確認是否為產業性還是公司特定問題。",
+        "EPS YoY":   "EPS 年增率（TTM YoY）：近四季獲利合計 vs 前四季合計的成長率。>20%為加速成長，負值代表獲利在下滑。",
+        "季度加速":   "最新一季和去年同季比較的 EPS 成長率。連續加速（每季比去年同期更好）代表獲利動能持續增強，是強勢的訊號。",
+        "殖利率":     "現金殖利率：每年配發的股息 ÷ 目前股價。代表持股每年能領到多少利息比例。>4%算高息股，<2%以配息角度吸引力偏低。",
+        "盈利能力":   "EPS 為正，代表公司目前有獲利，具備未來配發現金股利的能力基礎。",
+        "估值加成":   "本益比偏低（PE < 20倍），代表以目前股價買到每單位獲利更便宜，也讓殖利率有較高空間。",
+        "配息可持續": "以殖利率 × PE 估算的配息比率（payout ratio proxy）。若估算比率 < 100% 代表配息有可能可持續。",
+        "PE分位":     "本益比歷史分位數：目前 PE 在過去3年中的位置。25%以下=歷史便宜區（低估），75%以上=歷史貴區（高估），50%=中性。",
+        "PB":         "股價淨值比（PB）：股價是帳面資產的幾倍。<1.5倍通常算便宜，>3倍偏貴。金融業和資產重的公司更常用 PB 評估。",
+        "公平價估值": "以歷史 PE 中位數×近四季 EPS 計算的合理價，和目前 PE 在歷史分位比較，判斷目前股價是偏高還是偏低。",
+    }
     if scores.get("details"):
-        with st.expander("📋 健檢評分明細", expanded=False):
+        with st.expander("📋 健檢評分明細（含術語解說）", expanded=False):
             _det = scores["details"]
             _d1, _d2 = st.columns(2)
             _profit_keys = [k for k in _det if k in ("EPS盈利", "毛利率", "淨利率", "ROE")]
             _growth_keys = [k for k in _det if k in ("營收YoY", "EPS YoY", "季度加速")]
             _div_keys    = [k for k in _det if k in ("殖利率", "盈利能力", "估值加成", "配息可持續")]
             _val_keys    = [k for k in _det if k in ("PE分位", "PB", "公平價估值")]
+
+            def _show_items(keys):
+                for k in keys:
+                    st.markdown(f"**• {k}**：{_det[k]}")
+                    if k in _TERM_EXPLAIN:
+                        st.caption(f"  💬 {_TERM_EXPLAIN[k]}")
+
             with _d1:
                 st.markdown("**💰 獲利力**")
-                for k in _profit_keys: st.caption(f"• {k}：{_det[k]}")
+                _show_items(_profit_keys)
                 st.markdown("**📈 成長力**")
-                for k in _growth_keys: st.caption(f"• {k}：{_det[k]}")
+                _show_items(_growth_keys)
             with _d2:
                 st.markdown("**🎁 股利力**")
-                for k in _div_keys: st.caption(f"• {k}：{_det[k]}")
+                _show_items(_div_keys)
                 st.markdown("**⚖️ 估值**")
-                for k in _val_keys: st.caption(f"• {k}：{_det[k]}")
+                _show_items(_val_keys)
     st.caption("⚠️ 健檢評分為量化模型參考，不構成投資建議。請結合產業趨勢與個人風險承受度自行判斷。")
 
 
@@ -2126,6 +2149,14 @@ def main():
                             f"GBM 模型 800 路徑，年化波動率 {_mc_res['sigma_used']:.1f}%。"
                             "歷史模擬，不代表未來報酬，不構成投資建議。"
                         )
+                        st.info(
+                            "📌 **如何解讀蒙地卡羅**：此模擬以「歷史波動率（ATR）+ 近期動能」為輸入，"
+                            "模擬 800 條可能的股價路徑，顯示 20 日後的統計分布。\n"
+                            "- **P10（悲觀）**：10% 路徑最終比這更低\n"
+                            "- **P50（中位）**：500 條路徑的中間值，中性情境\n"
+                            "- **P90（樂觀）**：90% 路徑最終在這以下\n"
+                            "- 與下方「買賣訊號」衡量不同面向（MC=波動率機率，訊號=多因子評分），兩者均僅供參考。"
+                        )
                         _mc_c1, _mc_c2, _mc_c3, _mc_c4 = st.columns(4)
                         _mc_c1.metric("上漲機率", f"{_mc_res['prob_up']:.1f}%")
                         _mc_c2.metric("P10（悲觀）", f"{_mc_res['p10']:.1f}")
@@ -2155,7 +2186,11 @@ def main():
                 st.markdown("#### 🎯 買入/賣出訊號")
                 _engine = SignalEngine()
                 _tech_for_signal = st.session_state.tech_data.get(selected_ticker)
-                _sig = _engine.get_signal(stock.to_dict(), _tech_for_signal)
+                # 傳入動態載入的基本面（_fund_data 在 _stabs[0] 定義，with 不建立新 scope）
+                _sig = _engine.get_signal(
+                    stock.to_dict(), _tech_for_signal,
+                    fund_data=_fund_data if "_fund_data" in dir() else None,
+                )
                 sig_c1, sig_c2, sig_c3 = st.columns(3)
                 sig_c1.metric("訊號", _sig["label"])
                 sig_c2.metric("信心度", f"{_sig['confidence']:.0f}%")
@@ -2167,6 +2202,24 @@ def main():
                     st.markdown("**注意事項：**")
                     for c in _sig["caution"]:
                         st.warning(c)
+
+                # ── MC vs 訊號交叉驗證提示 ─────────────────────────────
+                _mc_prob_val = _mc_res.get("prob_up", 50) if "_mc_res" in dir() and _mc_res else None
+                if _mc_prob_val is not None:
+                    _is_buy_sig  = "買進" in _sig.get("label", "")
+                    _is_sell_sig = "減碼" in _sig.get("label", "") or "賣出" in _sig.get("label", "")
+                    if _is_buy_sig and _mc_prob_val < 45:
+                        st.warning(
+                            f"⚠️ **訊號衝突提醒**：「買進訊號」由籌碼/技術動能驅動，"
+                            f"但蒙地卡羅模擬（基於歷史波動率）顯示 20 日上漲概率僅 {_mc_prob_val:.0f}%，"
+                            "顯示波動較大、方向不確定。建議縮小部位或分批進場，"
+                            "等待籌碼確認後再加碼。"
+                        )
+                    elif _is_sell_sig and _mc_prob_val > 60:
+                        st.info(
+                            f"📊 蒙地卡羅模擬上漲概率 {_mc_prob_val:.0f}%，"
+                            "但技術/籌碼訊號偏空。可繼續觀察籌碼是否改善再決策。"
+                        )
 
 
             with _stabs[2]:  # ── 籌碼（三大法人 + 融資融券）
@@ -3073,9 +3126,69 @@ def main():
 
                     st.markdown("---")
 
+                    # ── ⭐ 本族群基本面前三名（先顯示，方便快速識別優質標的）───
+                    if not model_df.empty and not sub_df.empty:
+                        _top3_cols = [c for c in ["gross_margin", "eps", "revenue_yoy"]
+                                      if c in model_df.columns]
+                        if _top3_cols:
+                            _model_sub   = model_df[model_df["ticker"].isin(sub_df["ticker"].tolist())]
+                            _top3_metric = _top3_cols[0]
+                            _label_map3  = {"gross_margin": "毛利率%", "eps": "EPS(元)",
+                                            "revenue_yoy": "營收YoY%"}
+                            _metric_explain = {
+                                "gross_margin": "毛利率：賣出商品扣除直接成本後剩的比例，越高代表產品越有競爭力。",
+                                "eps":          "EPS（每股盈餘）：公司每1股在過去12個月賺了多少錢。",
+                                "revenue_yoy":  "月營收年增率：和去年同月相比，銷售額成長多少。",
+                            }
+                            _top3 = QuantModel.top_by_group(
+                                _model_sub, group_col="group",
+                                metric=_top3_metric, top_n=3
+                            )
+                            if not _top3.empty:
+                                _metric_lbl = _label_map3.get(_top3_metric, _top3_metric)
+                                st.markdown(f"#### ⭐ 本族群基本面前三名（依{_metric_lbl}排序）")
+                                st.caption(
+                                    f"以下為 **{sc_key}** 族群中，{_metric_lbl}最高的3家公司，"
+                                    "可作為基本面觀察標的。\n"
+                                    f"💬 {_metric_explain.get(_top3_metric, '')}"
+                                )
+                                _t3c = st.columns(min(3, len(_top3)))
+                                for _ci, (_, _tr) in enumerate(list(_top3.iterrows())[:3]):
+                                    _t3_ticker = _tr.get("ticker", "")
+                                    _t3_name   = _tr.get("name", "")
+                                    _t3_val    = _tr.get(_top3_metric)
+                                    with _t3c[_ci]:
+                                        st.markdown(f"**#{_ci+1} {_t3_ticker}**")
+                                        st.caption(_t3_name[:10])
+                                        st.metric(_metric_lbl, f"{_t3_val:.1f}" if _t3_val else "--")
+                                        if _t3_ticker not in st.session_state.watchlist:
+                                            if st.button("⭐ 追蹤", key=f"t3_wl_{_t3_ticker}",
+                                                         use_container_width=True):
+                                                st.session_state.watchlist[_t3_ticker] = {
+                                                    "name": _t3_name,
+                                                    "added_date": date.today().isoformat(),
+                                                }
+                                                write_json(WATCHLIST_FILE, st.session_state.watchlist)
+                                                st.rerun()
+                                        else:
+                                            st.caption("✅ 已追蹤")
+                                st.markdown("---")
+
+                    # ── 完整清單 ──────────────────────────────────────────
                     if sub_df.empty:
                         st.info("此分類目前無市場資料，載入後自動更新")
                     else:
+                        n_stocks = len(sub_df)
+                        st.markdown(
+                            f"#### 📋 族群完整清單（共 {n_stocks} 檔，依綜合評分排序）"
+                        )
+                        st.caption(
+                            "欄位說明：**代號**=股票代碼 ｜ **收盤**=當日收盤價(元) ｜ "
+                            "**漲跌%**=今日漲跌幅（▲紅=漲/▼綠=跌） ｜ "
+                            "**成交量**=今日成交量(萬張) ｜ "
+                            "**籌碼**=外資今日方向（🟢買超/🔴賣超/🟡持平或無資料） ｜ "
+                            "**等級**=模型候選等級（核心>觀察）"
+                        )
                         # ── 三竹風格：HTML 卡片行清單 ─────────────────────────
                         if "tab7_css" not in st.session_state:
                             st.markdown("""
@@ -3182,46 +3295,6 @@ def main():
                             except Exception:
                                 st.caption("產業新聞載入失敗")
 
-                    # ── 各領域基本面前三名 ────────────────────────────────────
-                    if not model_df.empty:
-                        st.markdown("---")
-                        st.markdown("##### ⭐ 本族群基本面前三名")
-                        _top3_cols = [c for c in ["gross_margin", "eps", "revenue_yoy"]
-                                      if c in model_df.columns]
-                        if _top3_cols and not sub_df.empty:
-                            _model_sub = model_df[model_df["ticker"].isin(sub_df["ticker"].tolist())]
-                            _top3_metric = _top3_cols[0]
-                            _top3 = QuantModel.top_by_group(
-                                _model_sub, group_col="group",
-                                metric=_top3_metric, top_n=3
-                            )
-                            if not _top3.empty:
-                                _t3c = st.columns(min(3, len(_top3)))
-                                for _ci, (_, _tr) in enumerate(list(_top3.iterrows())[:3]):
-                                    _t3_ticker = _tr.get("ticker", "")
-                                    _t3_name   = _tr.get("name", "")
-                                    _t3_val    = _tr.get(_top3_metric)
-                                    _label_map = {
-                                        "gross_margin": "毛利率%",
-                                        "eps": "EPS(元)",
-                                        "revenue_yoy": "營收YoY%",
-                                    }
-                                    with _t3c[_ci]:
-                                        st.markdown(f"**#{_ci+1} {_t3_ticker}**")
-                                        st.caption(_t3_name[:8])
-                                        st.metric(_label_map.get(_top3_metric, _top3_metric),
-                                                  f"{_t3_val:.1f}" if _t3_val else "--")
-                                        if _t3_ticker not in st.session_state.watchlist:
-                                            if st.button("⭐ 追蹤", key=f"t3_wl_{_t3_ticker}",
-                                                         use_container_width=True):
-                                                st.session_state.watchlist[_t3_ticker] = {
-                                                    "name": _t3_name,
-                                                    "added_date": date.today().isoformat(),
-                                                }
-                                                write_json(WATCHLIST_FILE, st.session_state.watchlist)
-                                                st.rerun()
-                                        else:
-                                            st.caption("✅ 已追蹤")
 
     # ========== Tab 8: 模型設定 ==========
     with tabs[7]:

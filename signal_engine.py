@@ -11,8 +11,9 @@ class SignalEngine:
 
     def get_signal(
         self,
-        stock: Dict,        # from model_df row (prob20, momentum_score, flow_score, etc.)
-        tech: Dict = None,  # from tech_analyze() result (analysis sub-dict)
+        stock: Dict,              # from model_df row (prob20, momentum_score, flow_score, etc.)
+        tech: Dict = None,        # from tech_analyze() result (analysis sub-dict)
+        fund_data: Dict = None,   # 動態載入的最新基本面（覆蓋 model_df 快照）
     ) -> Dict:
         """
         回傳:
@@ -30,23 +31,34 @@ class SignalEngine:
         bullish_score = 0
         bearish_score = 0
 
-        prob20       = stock.get("prob20", 50)
-        prob5        = stock.get("prob5", 50)
-        prob60       = stock.get("prob60", 50)
-        confidence   = stock.get("confidence", 50)
-        risk_score   = stock.get("risk_score", 50)
-        momentum     = stock.get("momentum_score", 50)
-        flow         = stock.get("flow_score", 50)
-        quality      = stock.get("quality_score", 50)
-        composite    = stock.get("composite_score", 50)
-        foreign_net  = stock.get("foreign_net")
-        trust_net    = stock.get("trust_net")
-        pe           = stock.get("pe")
-        pb           = stock.get("pb")
-        eps          = stock.get("eps")
-        revenue_yoy  = stock.get("revenue_yoy")
-        gross_margin = stock.get("gross_margin")
-        scoring_path = stock.get("scoring_path", "技術動能")
+        # 若有動態載入的基本面資料，覆蓋 model_df 的舊快照
+        # （解決「健檢有資料但訊號說尚無基本面」的不一致問題）
+        s = stock.copy()
+        if fund_data and fund_data.get("data_type") != "NO_DATA":
+            for _k in ["eps", "pe", "pb", "gross_margin", "net_margin",
+                       "revenue_yoy", "eps_growth_yoy", "roe", "dividend_yield"]:
+                if fund_data.get(_k) is not None:
+                    s[_k] = fund_data[_k]
+            if not s.get("scoring_path") or s.get("scoring_path") == "技術動能":
+                s["scoring_path"] = "完整"
+
+        prob20       = s.get("prob20", 50)
+        prob5        = s.get("prob5", 50)
+        prob60       = s.get("prob60", 50)
+        confidence   = s.get("confidence", 50)
+        risk_score   = s.get("risk_score", 50)
+        momentum     = s.get("momentum_score", 50)
+        flow         = s.get("flow_score", 50)
+        quality      = s.get("quality_score", 50)
+        composite    = s.get("composite_score", 50)
+        foreign_net  = s.get("foreign_net")
+        trust_net    = s.get("trust_net")
+        pe           = s.get("pe")
+        pb           = s.get("pb")
+        eps          = s.get("eps")
+        revenue_yoy  = s.get("revenue_yoy")
+        gross_margin = s.get("gross_margin")
+        scoring_path = s.get("scoring_path", "技術動能")
 
         # ── 量化機率訊號 ──
         if prob20 >= 65:
