@@ -2604,104 +2604,271 @@ def main():
                 wc4.metric("風險",     f"{wl_stock['risk_score']:.0f}")
                 wc5.metric("收盤價",   f"${wl_stock['close']:.2f}" if wl_stock.get('close') is not None else "--")
 
-                # 健檢儀表板（緊湊版）
-                _wl_fund = st.session_state.watchlist_data.get(selected_wl, {}).get("fundamental", {})
-                if _wl_fund:
-                    st.markdown("##### 🏥 個股健檢")
+                # ── 共用資料準備 ──────────────────────────────────────────
+                _wl_fund = (st.session_state.watchlist_data.get(selected_wl, {}).get("fundamental")
+                            or st.session_state.stock_fundamentals.get(selected_wl) or {})
+
+                # ── 四個子 Tab ────────────────────────────────────────────
+                _wl_stabs = st.tabs(["📊 基本面/籌碼", "📈 技術面", "⚖️ 估值/操作", "💬 新聞/筆記"])
+
+                with _wl_stabs[0]:  # ── 基本面 / 籌碼 / 續抱評估 ──────────
+                    st.markdown("#### 🏥 個股健檢")
                     render_health_check_block(
                         fund=_wl_fund,
                         val_pct=st.session_state.get(f"_vp_{selected_wl}"),
                         epsfv=st.session_state.get(f"_ev_{selected_wl}"),
-                        compact=True,
+                        compact=False,
                     )
+                    st.markdown("---")
+                    st.markdown("#### 📊 基本面")
+                    if _wl_fund:
+                        render_fundamental_block(_wl_fund)
+                    else:
+                        st.info("⚠️ 尚未載入基本面，請等候自動更新")
+                    st.markdown("---")
+                    st.markdown("#### 💰 籌碼")
+                    render_flow_block(wl_stock.to_dict())
 
-                # 基本面
-                st.markdown("##### 📊 基本面")
-                if selected_wl in st.session_state.watchlist_data:
-                    render_fundamental_block(_wl_fund)
-                else:
-                    st.info("⚠️ 載入中...")
+                    # ── 續抱評估 ─────────────────────────────────────────
+                    _wl_meta  = st.session_state.watchlist.get(selected_wl, {})
+                    _prev_eps = _wl_meta.get("last_seen_eps")
+                    _prev_q   = _wl_meta.get("last_seen_quarter", "")
+                    _curr_eps = _wl_fund.get("eps")
+                    _curr_pe  = _wl_fund.get("pe")
+                    _curr_gm  = _wl_fund.get("gross_margin")
+                    _curr_yoy = _wl_fund.get("revenue_yoy")
 
-                # 籌碼
-                st.markdown("##### 💰 籌碼")
-                render_flow_block(wl_stock.to_dict())
-
-                # 新聞
-                st.markdown("##### 📰 新聞情緒")
-                if selected_wl in st.session_state.watchlist_data:
-                    render_news_block(
-                        st.session_state.watchlist_data[selected_wl].get("news", {})
-                    )
-                else:
-                    st.info("⚠️ 載入中...")
-
-                # ── 財報更新 → 續抱評估 ─────────────────────────────────────
-                _wl_meta = st.session_state.watchlist.get(selected_wl, {})
-                _prev_eps = _wl_meta.get("last_seen_eps")
-                _prev_q   = _wl_meta.get("last_seen_quarter", "")
-                _fund_wl  = (st.session_state.watchlist_data.get(selected_wl, {}).get("fundamental")
-                             or st.session_state.stock_fundamentals.get(selected_wl) or {})
-                _curr_eps = _fund_wl.get("eps")
-                _curr_pe  = _fund_wl.get("pe")
-                _curr_gm  = _fund_wl.get("gross_margin")
-                _curr_yoy = _fund_wl.get("revenue_yoy")
-
-                if _curr_eps is not None:
-                    _eps_updated = (_prev_eps is not None and abs(_curr_eps - _prev_eps) > 0.01)
-                    if _eps_updated:
-                        st.warning(f"🆕 **財報更新偵測**：EPS 從 {_prev_eps:.2f} → {_curr_eps:.2f} 元（{_prev_q} 以來）")
-
-                    with st.expander("📋 續抱評估（點擊展開）", expanded=_eps_updated):
-                        if _prev_eps is not None and abs(_prev_eps) > 0.01:
-                            _eps_chg = (_curr_eps - _prev_eps) / abs(_prev_eps) * 100
-                        else:
-                            _eps_chg = None
-
-                        st.markdown(f"**目前 EPS：{_curr_eps:.2f} 元**")
-                        if _eps_chg is not None:
-                            st.metric("EPS 變化（vs 上次記錄）", f"{_curr_eps:.2f}",
-                                      delta=f"{_eps_chg:+.1f}%",
-                                      delta_color="normal" if _eps_chg > 0 else "inverse")
-
-                        if _curr_pe is not None:
-                            pe_lbl = "🏷️ 偏低" if _curr_pe < 15 else "🟡 合理" if _curr_pe < 25 else "🔴 偏高"
-                            st.write(f"PE：{_curr_pe:.1f}x — {pe_lbl}")
-                        if _curr_gm is not None:
-                            st.write(f"毛利率：{_curr_gm:.1f}%")
-                        if _curr_yoy is not None:
-                            st.write(f"月營收 YoY：{_curr_yoy:+.1f}%")
-
-                        # 簡單決策樹
-                        if _eps_chg is not None:
-                            if _eps_chg > 20 and (_curr_pe or 99) < 20:
-                                verdict = "🟢 建議：可續抱或考慮加碼，EPS 強勁成長且 PE 合理"
-                            elif _eps_chg > 5:
-                                verdict = "🟡 建議：可續抱，EPS 成長中，注意 PE 是否偏高"
-                            elif _eps_chg < -15 and (_curr_pe or 0) > 25:
-                                verdict = "🔴 建議：考慮減倉，EPS 衰退且估值偏高"
-                            elif _eps_chg < 0:
-                                verdict = "🟡 建議：觀察，EPS 小幅下降，追蹤下季確認趨勢"
+                    if _curr_eps is not None:
+                        _eps_updated = (_prev_eps is not None and abs(_curr_eps - _prev_eps) > 0.01)
+                        if _eps_updated:
+                            st.warning(f"🆕 **財報更新偵測**：EPS 從 {_prev_eps:.2f} → {_curr_eps:.2f} 元（{_prev_q} 以來）")
+                        with st.expander("📋 續抱評估（點擊展開）", expanded=_eps_updated):
+                            _eps_chg = ((_curr_eps - _prev_eps) / abs(_prev_eps) * 100
+                                        if _prev_eps is not None and abs(_prev_eps) > 0.01 else None)
+                            st.markdown(f"**目前 EPS：{_curr_eps:.2f} 元**")
+                            if _eps_chg is not None:
+                                st.metric("EPS 變化（vs 上次記錄）", f"{_curr_eps:.2f}",
+                                          delta=f"{_eps_chg:+.1f}%",
+                                          delta_color="normal" if _eps_chg > 0 else "inverse")
+                            if _curr_pe:  st.write(f"PE：{_curr_pe:.1f}x — {'🏷️ 偏低' if _curr_pe < 15 else '🟡 合理' if _curr_pe < 25 else '🔴 偏高'}")
+                            if _curr_gm:  st.write(f"毛利率：{_curr_gm:.1f}%")
+                            if _curr_yoy: st.write(f"月營收 YoY：{_curr_yoy:+.1f}%")
+                            if _eps_chg is not None:
+                                if _eps_chg > 20 and (_curr_pe or 99) < 20:   verdict = "🟢 建議：可續抱或考慮加碼，EPS 強勁成長且 PE 合理"
+                                elif _eps_chg > 5:                             verdict = "🟡 建議：可續抱，EPS 成長中，注意 PE 是否偏高"
+                                elif _eps_chg < -15 and (_curr_pe or 0) > 25: verdict = "🔴 建議：考慮減倉，EPS 衰退且估值偏高"
+                                elif _eps_chg < 0:                             verdict = "🟡 建議：觀察，EPS 小幅下降，追蹤下季確認趨勢"
+                                else:                                           verdict = "⚪ 建議：持平觀望，EPS 變化不大"
+                            elif _curr_pe:
+                                verdict = ("🟢 估值偏低，有安全邊際" if _curr_pe < 12
+                                           else "🟡 估值偏高，控制部位" if _curr_pe > 30
+                                           else "⚪ 估值合理，持續追蹤")
                             else:
-                                verdict = "⚪ 建議：持平觀望，EPS 變化不大"
-                        elif _curr_pe is not None:
-                            if _curr_pe < 12:
-                                verdict = "🟢 估值偏低，有安全邊際"
-                            elif _curr_pe > 30:
-                                verdict = "🟡 估值偏高，控制部位"
-                            else:
-                                verdict = "⚪ 估值合理，持續追蹤"
-                        else:
-                            verdict = "⚪ 資料不足，請載入基本面後評估"
+                                verdict = "⚪ 資料不足，請載入基本面後評估"
+                            st.info(verdict)
+                            if st.button("✅ 更新基準（記錄目前 EPS）", key=f"update_eps_{selected_wl}"):
+                                st.session_state.watchlist[selected_wl]["last_seen_eps"] = _curr_eps
+                                st.session_state.watchlist[selected_wl]["last_seen_quarter"] = date.today().strftime("%Y-Q?")
+                                st.session_state.watchlist[selected_wl]["last_eval_date"] = date.today().isoformat()
+                                write_json(WATCHLIST_FILE, st.session_state.watchlist)
+                                st.success(f"✅ 已記錄 {selected_wl} EPS 基準：{_curr_eps:.2f}")
+                                st.rerun()
 
-                        st.info(verdict)
-
-                        if st.button("✅ 更新基準（記錄目前 EPS）", key=f"update_eps_{selected_wl}"):
-                            st.session_state.watchlist[selected_wl]["last_seen_eps"] = _curr_eps
-                            st.session_state.watchlist[selected_wl]["last_seen_quarter"] = date.today().strftime("%Y-Q?")
-                            st.session_state.watchlist[selected_wl]["last_eval_date"] = date.today().isoformat()
-                            write_json(WATCHLIST_FILE, st.session_state.watchlist)
-                            st.success(f"✅ 已記錄 {selected_wl} EPS 基準：{_curr_eps:.2f}")
+                with _wl_stabs[1]:  # ── 技術面 ────────────────────────────
+                    _wl_ta = st.session_state.tech_data.get(selected_wl)
+                    if _wl_ta is None:
+                        st.info("⚠️ 尚未載入 K 線技術資料")
+                        if st.button("🔄 載入技術分析（120 日 K 線）",
+                                     key=f"wl_load_tech_{selected_wl}"):
+                            with st.spinner("載入中..."):
+                                _fm_wl_t = FinMindLoader(token=st.session_state.get("finmind_token", ""))
+                                _pd_wl   = _fm_wl_t.get_price_history(selected_wl, days=120)
+                                _ta_wl   = tech_analyze(_pd_wl, selected_wl, wl_stock["name"])
+                                st.session_state.tech_data[selected_wl] = _ta_wl
                             st.rerun()
+                    else:
+                        render_tech_block(_wl_ta, wl_stock.to_dict())
+                        # ── 操作區間 ────────────────────────────────────
+                        if _wl_ta.get("analysis"):
+                            _wla    = _wl_ta["analysis"]
+                            _wlcurr = _wla.get("current_price") or wl_stock.get("close")
+                            _wlsup  = _wla.get("supports", [])
+                            _wlres  = _wla.get("resistances", [])
+                            _wlrsi  = _wla.get("rsi")
+                            _wlb20  = _wla.get("bias20")
+                            _wlkd   = _wla.get("kd_cross", False)
+                            _wlev   = st.session_state.get(f"_ev_{selected_wl}", {})
+                            _wlvp   = st.session_state.get(f"_vp_{selected_wl}", {})
+                            _wl_fair_mid  = _wlev.get("fair_mid")  if _wlev.get("has_data") else None
+                            _wl_fair_high = _wlev.get("fair_high") if _wlev.get("has_data") else None
+                            _wl_pe_pct    = _wlvp.get("pe_pct")
+
+                            st.markdown("---")
+                            st.markdown("#### 📍 操作價格區間參考")
+                            st.caption("⚠️ 整合技術面支撐壓力 + 基本面估值，僅供研究，不構成投資建議。")
+                            with st.expander("展開操作區間分析", expanded=True):
+                                def _wpstr(v): return f"{v:.1f}" if v is not None else "--"
+                                _wlbl  = _wlsup[-1] if _wlsup else (_wlcurr * 0.90 if _wlcurr else None)
+                                _wlbh  = _wlsup[0]  if len(_wlsup) >= 1 else (_wlcurr * 0.95 if _wlcurr else None)
+                                _wlel  = _wlres[0]  if _wlres else (_wlcurr * 1.08 if _wlcurr else None)
+                                _wlst  = _wlsup[-1] if len(_wlsup) >= 2 else (_wlcurr * 0.92 if _wlcurr else None)
+                                _wlbr  = [f"接近支撐位（{_wpstr(_wlbh)} 元）"] if _wlsup else []
+                                if _wl_pe_pct and _wl_pe_pct < 35: _wlbr.append(f"PE 歷史 {_wl_pe_pct:.0f}% 分位（偏低估）")
+                                if _wlb20 and _wlb20 < -8: _wlbr.append(f"MA20 乖離 {_wlb20:.1f}%（超賣）")
+                                if _wlkd: _wlbr.append("KD 黃金交叉")
+                                _wler  = [f"接近壓力位（{_wpstr(_wlel)} 元）"] if _wlres else []
+                                if _wl_fair_high: _wler.append(f"超過樂觀估值（{_wpstr(_wl_fair_high)} 元）")
+                                if _wl_pe_pct and _wl_pe_pct > 70: _wler.append(f"PE 歷史 {_wl_pe_pct:.0f}% 分位（偏高估）")
+                                if _wlrsi and _wlrsi > 70: _wler.append(f"RSI {_wlrsi:.1f}（超買）")
+                                z1, z2, z3, z4 = st.columns(4)
+                                with z1:
+                                    st.markdown("🟢 **積極買進區**")
+                                    st.markdown(f"**{_wpstr(_wlbl)} — {_wpstr(_wlbh)} 元**")
+                                    for _r in (_wlbr or ["技術支撐附近"]): st.caption(f"• {_r}")
+                                with z2:
+                                    _wlhh = _wl_fair_mid or (_wlcurr * 1.03 if _wlcurr else None)
+                                    st.markdown("🟡 **分批介入 / 持有**")
+                                    st.markdown(f"**{_wpstr(_wlbh)} — {_wpstr(_wlhh)} 元**")
+                                    st.caption("• PE 合理區")
+                                    if _wl_fair_mid: st.caption(f"• 合理估值中位 {_wpstr(_wl_fair_mid)} 元")
+                                with z3:
+                                    st.markdown("⚪ **觀望 / 持股待漲**")
+                                    st.markdown(f"**{_wpstr(_wlhh)} — {_wpstr(_wlel)} 元**")
+                                    st.caption("• 估值趨中性，縮小新增部位")
+                                with z4:
+                                    st.markdown("🔴 **逢高分批出清**")
+                                    st.markdown(f"**{_wpstr(_wlel)} 元以上**")
+                                    for _r in (_wler or ["接近技術壓力區"]): st.caption(f"• {_r}")
+                                st.markdown("---")
+                                st.error(f"🔴 **止損參考**：{_wpstr(_wlst)} 元 ｜ {'支撐失守' if _wlst else '技術破位'}")
+
+                        # ── 蒙地卡羅 ────────────────────────────────────
+                        if _wl_ta.get("analysis"):
+                            _wlamc   = _wl_ta["analysis"]
+                            _wlatr   = _wlamc.get("atr")
+                            _wlclose = _wlamc.get("current_price") or wl_stock.get("close")
+                            if _wlclose and _wlclose > 0 and _wlatr and _wlatr > 0:
+                                _wlsig  = (_wlatr / _wlclose) * (252 ** 0.5)
+                                _wlmu   = (wl_stock.get("momentum_score", 50) or 50 - 50) / 50 * 0.3
+                                _wlmc   = QuantModel.monte_carlo_price(_wlclose, _wlsig, mu=_wlmu, days=20, n_sim=800)
+                                if _wlmc:
+                                    st.markdown("---")
+                                    st.markdown("#### 🎲 蒙地卡羅模擬（20日）")
+                                    st.caption(f"GBM 800 路徑，年化波動率 {_wlmc['sigma_used']:.1f}%。不構成投資建議。")
+                                    mc1, mc2, mc3, mc4 = st.columns(4)
+                                    mc1.metric("上漲機率", f"{_wlmc['prob_up']:.1f}%")
+                                    mc2.metric("P10（悲觀）", f"{_wlmc['p10']:.1f}")
+                                    mc3.metric("P50（中位）", f"{_wlmc['p50']:.1f}",
+                                               delta=f"{_wlmc['expected_return']:+.1f}%")
+                                    mc4.metric("P90（樂觀）", f"{_wlmc['p90']:.1f}")
+
+                        # ── 買賣訊號 ────────────────────────────────────
+                        st.markdown("---")
+                        st.markdown("#### 🎯 買賣訊號")
+                        _wl_engine = SignalEngine()
+                        _wl_sig = _wl_engine.get_signal(
+                            wl_stock.to_dict(), _wl_ta, fund_data=_wl_fund
+                        )
+                        sc1, sc2, sc3 = st.columns(3)
+                        sc1.metric("訊號", _wl_sig["label"])
+                        sc2.metric("信心度", f"{_wl_sig['confidence']:.0f}%")
+                        sc3.metric("評分路徑", _wl_sig["scoring_path"])
+                        st.markdown("**買進理由：**")
+                        for _r in _wl_sig["reasons"]: st.write(_r)
+                        if _wl_sig["caution"]:
+                            st.markdown("**注意事項：**")
+                            for _c in _wl_sig["caution"]: st.warning(_c)
+
+                with _wl_stabs[2]:  # ── 估值/操作 ─────────────────────────
+                    st.markdown("#### 📊 PE／PB／殖利率歷史分位數")
+                    with st.spinner("載入估值歷史..."):
+                        _fm_wl_v = FinMindLoader(token=st.session_state.get("finmind_token", ""))
+                        _wl_per  = _fm_wl_v.get_per_trend(selected_wl, months=36)
+                        _wl_vp   = _fm_wl_v.get_valuation_percentile(selected_wl)
+                        _wl_epsfv= _fm_wl_v.get_eps_fair_value(selected_wl)
+                        st.session_state[f"_vp_{selected_wl}"] = _wl_vp
+                        st.session_state[f"_ev_{selected_wl}"] = _wl_epsfv
+                    if _wl_per:
+                        _wpdf = pd.DataFrame(_wl_per)
+                        _wfig = go.Figure()
+                        if _wpdf["pe"].notna().any():
+                            _wfig.add_scatter(x=_wpdf["date"], y=_wpdf["pe"],
+                                              name="PE", line=dict(color="royalblue", width=2))
+                        if _wpdf["pb"].notna().any():
+                            _wfig.add_scatter(x=_wpdf["date"], y=_wpdf["pb"], yaxis="y2",
+                                              name="PB", line=dict(color="orange", width=2, dash="dot"))
+                        if _wpdf["dy"].notna().any():
+                            _wfig.add_scatter(x=_wpdf["date"], y=_wpdf["dy"], yaxis="y3",
+                                              name="殖利率%", line=dict(color="green", width=2, dash="dash"))
+                        _wfig.update_layout(
+                            title="PE / PB / 殖利率 近36個月趨勢", height=300,
+                            margin=dict(t=40, b=20),
+                            yaxis=dict(title="PE"), legend=dict(orientation="h", y=-0.2),
+                            yaxis2=dict(title="PB", overlaying="y", side="right", showgrid=False),
+                            yaxis3=dict(title="殖利率%", overlaying="y", side="right",
+                                        anchor="free", position=1.0, showgrid=False),
+                        )
+                        st.plotly_chart(_wfig, use_container_width=True)
+                        st.markdown(f"**估值判斷：{_wl_vp.get('status', '--')}**")
+                        st.caption(_wl_vp.get("suggestion", ""))
+                        _wpc = st.columns(3)
+                        for _col, (_lbl, _k, _ck, _lg) in zip(_wpc, [
+                            ("PE", "pe_pct", "pe_curr", True),
+                            ("PB", "pb_pct", "pb_curr", True),
+                            ("殖利率", "dy_pct", "dy_curr", False),
+                        ]):
+                            _p = _wl_vp.get(_k); _cv = _wl_vp.get(_ck)
+                            _col.metric(_lbl, f"{_cv:.1f}" if _cv else "--",
+                                        f"歷史 {_p:.0f}% 分位" if _p else "分位不足")
+                    else:
+                        st.info("⚠️ 無 PE/PB/殖利率歷史資料（需 FinMind token）")
+
+                    st.markdown("---")
+                    st.markdown("#### 💡 EPS 公平價估算")
+                    if _wl_epsfv.get("has_data"):
+                        _wcp = wl_stock.get("close")
+                        _ev1, _ev2, _ev3 = st.columns(3)
+                        _ev1.metric("保守價（PE 25th）", f"{_wl_epsfv['fair_low']:.1f}",
+                                    help=f"PE {_wl_epsfv['pe_25']}x × EPS {_wl_epsfv['eps']:.2f}元")
+                        _ev2.metric("合理價（PE 中位）", f"{_wl_epsfv['fair_mid']:.1f}",
+                                    help=f"PE {_wl_epsfv['pe_50']}x × EPS {_wl_epsfv['eps']:.2f}元",
+                                    delta=f"目前 {((_wcp / _wl_epsfv['fair_mid'] - 1) * 100):+.1f}%" if _wcp and _wl_epsfv['fair_mid'] else None)
+                        _ev3.metric("樂觀價（PE 75th）", f"{_wl_epsfv['fair_high']:.1f}",
+                                    help=f"PE {_wl_epsfv['pe_75']}x × EPS {_wl_epsfv['eps']:.2f}元")
+                        if _wl_epsfv.get("fair_growth"):
+                            _eg = _wl_epsfv.get("eps_growth_rate") or 0
+                            _eg4 = st.columns(1)[0]
+                            _eg4.metric("成長調整價 🚀", f"{_wl_epsfv['fair_growth']:.1f}",
+                                        help=f"EPS YoY {_eg:+.1f}% 調整 PE → {_wl_epsfv['pe_growth_adj']}x")
+                        if _wcp:
+                            if _wcp < _wl_epsfv["fair_low"]:     st.success(f"✅ 股價低於保守估值，具安全邊際")
+                            elif _wcp < _wl_epsfv["fair_mid"]:   st.info(f"🟡 股價介於保守與合理之間")
+                            elif _wcp < _wl_epsfv["fair_high"]:  st.warning(f"🟡 股價高於合理中位，留意估值風險")
+                            else:                                  st.error(f"🔴 股價超過樂觀估值，追高風險高")
+                        st.caption("⚠️ 公平價以過去3年PE中位數×TTM EPS估算，僅供研究。")
+                    else:
+                        st.caption("⚠️ EPS 公平價需要 FinMind 財報資料")
+
+                with _wl_stabs[3]:  # ── 新聞/筆記 ─────────────────────────
+                    st.markdown("#### 📰 新聞情緒")
+                    if selected_wl in st.session_state.watchlist_data:
+                        render_news_block(
+                            st.session_state.watchlist_data[selected_wl].get("news", {})
+                        )
+                    else:
+                        st.info("⚠️ 載入中...")
+                    st.markdown("---")
+                    st.markdown("#### 📝 個人研究筆記")
+                    _wl_note = st.session_state.notes.get(selected_wl, "")
+                    _wl_new_note = st.text_area(
+                        "筆記內容", _wl_note, height=150,
+                        placeholder="研究想法、觀察重點、進出場理由...",
+                        key=f"wl_note_{selected_wl}",
+                    )
+                    if st.button("💾 保存筆記", key=f"wl_note_save_{selected_wl}"):
+                        st.session_state.notes[selected_wl] = _wl_new_note
+                        write_json(NOTES_FILE, st.session_state.notes)
+                        st.success("✅ 筆記已保存")
 
                 # 移除追蹤
                 if st.button(f"❌ 移除 {selected_wl} 的追蹤", key=f"rm_wl_{selected_wl}"):
