@@ -98,9 +98,10 @@ class TWSeInstitutionalLoader:
                 name = row.get("name", "")
                 if name in ("外陸資買賣超股數(千股)", "自營商買賣超股數(千股)", "投信買賣超股數(千股)", "三大法人買賣超股數"):
                     continue
-                fn = int(row.get("Foreign_Investor_diff", 0) or 0)
-                tn = int(row.get("Investment_Trust_diff",  0) or 0)
-                dn = int(row.get("Dealer_diff",             0) or 0)
+                # FinMind 同樣以「股」為單位，÷1000 換算為「張」與 TWSE 路徑一致
+                fn = round(int(row.get("Foreign_Investor_diff", 0) or 0) / 1000)
+                tn = round(int(row.get("Investment_Trust_diff",  0) or 0) / 1000)
+                dn = round(int(row.get("Dealer_diff",             0) or 0) / 1000)
                 if t not in result:
                     result[t] = {
                         "foreign_net": fn, "trust_net": tn, "dealer_net": dn,
@@ -117,7 +118,8 @@ class TWSeInstitutionalLoader:
     def get_institutional_all(self, finmind_token: str = "") -> Dict[str, Dict]:
         """
         取得全市場三大法人買賣超（1 天快取）
-        單次 API 呼叫取得所有股票，千股為單位
+        單次 API 呼叫取得所有股票。API 原始單位為「股」，
+        本方法已換算為「張」（= 1,000 股 = 千股）後回傳，與全平台顯示一致。
         """
         key = "inst"
         cached = self._hit(key)
@@ -134,7 +136,7 @@ class TWSeInstitutionalLoader:
                     "https://www.twse.com.tw/fund/T86",
                     params={
                         "response": "json",
-                        "date": self._roc(dt),
+                        "date": dt.strftime("%Y%m%d"),  # T86 需西元 YYYYMMDD（非民國）
                         "selectType": "ALL",
                     },
                     timeout=(5, 8),  # (connect_timeout, read_timeout)
@@ -154,9 +156,10 @@ class TWSeInstitutionalLoader:
                             return fi[c]
                     return default
 
-                f_idx = idx(["外陸資買賣超股數(千股)", "外資買賣超股數(千股)"], 4)
-                t_idx = idx(["投信買賣超股數(千股)"], 10)
-                d_idx = idx(["自營商買賣超股數(千股)"], 11)
+                # TWSE T86 實際欄位名（單位為「股」），保留舊名作為相容備援
+                f_idx = idx(["外陸資買賣超股數(不含外資自營商)", "外陸資買賣超股數(千股)", "外資買賣超股數(千股)"], 4)
+                t_idx = idx(["投信買賣超股數", "投信買賣超股數(千股)"], 10)
+                d_idx = idx(["自營商買賣超股數", "自營商買賣超股數(千股)"], 11)
                 # 三大法人合計（通常是最後一欄）
                 total_keys = [k for k in fi if "三大法人" in k]
                 tot_idx = fi[total_keys[0]] if total_keys else (len(fields) - 1)
@@ -169,14 +172,19 @@ class TWSeInstitutionalLoader:
                     ticker = str(row[0]).strip()
                     if not ticker or not ticker[0].isdigit():
                         continue
-                    fn = self._num(row[f_idx])
-                    tn = self._num(row[t_idx])
-                    dn = self._num(row[d_idx])
+                    # T86 回傳單位為「股」，平台統一以「張」（= 1,000 股）顯示，故 ÷1000
+                    fn = round(self._num(row[f_idx]) / 1000)
+                    tn = round(self._num(row[t_idx]) / 1000)
+                    dn = round(self._num(row[d_idx]) / 1000)
+                    tot = (
+                        round(self._num(row[tot_idx]) / 1000)
+                        if len(row) > tot_idx else fn + tn + dn
+                    )
                     result[ticker] = {
                         "foreign_net": fn,
                         "trust_net": tn,
                         "dealer_net": dn,
-                        "total_net": self._num(row[tot_idx]) if len(row) > tot_idx else fn + tn + dn,
+                        "total_net": tot,
                         "date": date_label,
                         "data_source": "✅ TWSE API",
                     }
@@ -217,7 +225,7 @@ class TWSeInstitutionalLoader:
                     "https://www.twse.com.tw/exchangeReport/MI_MARGN",
                     params={
                         "response": "json",
-                        "date": self._roc(dt),
+                        "date": dt.strftime("%Y%m%d"),  # MI_MARGN 需西元 YYYYMMDD（非民國）
                         "selectType": "ALL",
                     },
                     timeout=(5, 8),  # (connect_timeout, read_timeout)

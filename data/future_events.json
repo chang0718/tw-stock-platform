@@ -1,0 +1,324 @@
+{
+  "schema_version": 2,
+  "default_horizon_days": 180,
+  "watchlist_horizon_days": 365,
+  "time_windows": [
+    {
+      "id": "near",
+      "name": "近期 0-14 天",
+      "min_days": 0,
+      "max_days": 14,
+      "priority": 5
+    },
+    {
+      "id": "short_mid",
+      "name": "短中期 15-45 天",
+      "min_days": 15,
+      "max_days": 45,
+      "priority": 4
+    },
+    {
+      "id": "mid",
+      "name": "中期 46-90 天",
+      "min_days": 46,
+      "max_days": 90,
+      "priority": 3
+    },
+    {
+      "id": "long",
+      "name": "長期 91-180 天",
+      "min_days": 91,
+      "max_days": 180,
+      "priority": 2
+    },
+    {
+      "id": "watchlist",
+      "name": "延伸觀察 181-365 天",
+      "min_days": 181,
+      "max_days": 365,
+      "priority": 1
+    }
+  ],
+  "event_types": [
+    {
+      "id": "macro_inflation",
+      "name": "通膨 / CPI / PCE",
+      "supply_chain_rule_ids": [
+        "macro_rates_to_growth_tech"
+      ]
+    },
+    {
+      "id": "central_bank",
+      "name": "央行 / 利率 / 美債",
+      "supply_chain_rule_ids": [
+        "macro_rates_to_growth_tech"
+      ]
+    },
+    {
+      "id": "taiwan_macro_industry",
+      "name": "台灣總經 / 產業統計",
+      "supply_chain_rule_ids": [
+        "macro_rates_to_growth_tech",
+        "semiconductor_roadmap_to_supply_chain"
+      ]
+    },
+    {
+      "id": "ai_datacenter",
+      "name": "AI / 資料中心 / 雲端資本支出",
+      "supply_chain_rule_ids": [
+        "ai_platform_to_server_chain"
+      ]
+    },
+    {
+      "id": "semiconductor",
+      "name": "半導體 / 製程 / 設備材料",
+      "supply_chain_rule_ids": [
+        "semiconductor_roadmap_to_supply_chain"
+      ]
+    },
+    {
+      "id": "advanced_packaging",
+      "name": "先進封裝 / HBM / CPO",
+      "supply_chain_rule_ids": [
+        "advanced_packaging_to_components"
+      ]
+    },
+    {
+      "id": "leo_satellite",
+      "name": "低軌衛星 / 通訊",
+      "supply_chain_rule_ids": [
+        "leo_to_rf_ground_chain"
+      ]
+    },
+    {
+      "id": "robotics_physical_ai",
+      "name": "機器人 / 實體 AI",
+      "supply_chain_rule_ids": [
+        "robotics_to_motion_control_chain"
+      ]
+    },
+    {
+      "id": "autonomous_vehicle",
+      "name": "自動駕駛 / Robotaxi / 車用 AI",
+      "supply_chain_rule_ids": [
+        "autonomous_vehicle_to_edge_ai_chain"
+      ]
+    },
+    {
+      "id": "ipo_capital_market",
+      "name": "IPO / 資本市場",
+      "supply_chain_rule_ids": [
+        "ipo_to_sector_valuation_watch"
+      ]
+    },
+    {
+      "id": "energy_commodities",
+      "name": "能源 / 原物料 / 航運",
+      "supply_chain_rule_ids": [
+        "energy_commodities_to_cost_chain"
+      ]
+    },
+    {
+      "id": "geopolitical_risk",
+      "name": "戰爭 / 地緣政治 / 供應鏈風險",
+      "supply_chain_rule_ids": [
+        "geopolitics_to_supply_chain_risk"
+      ]
+    }
+  ],
+  "seed_events": [
+    {
+      "id": "bls-cpi-2026-06-10",
+      "title": "美國 CPI 公布：2026 年 5 月資料",
+      "event_type": "macro_inflation",
+      "start_date": "2026-06-10",
+      "end_date": "2026-06-10",
+      "status": "official",
+      "source_name": "U.S. Bureau of Labor Statistics",
+      "source_url": "https://www.bls.gov/schedule/news_release/cpi.htm",
+      "source_note": "BLS release schedule; exact date must be rechecked by source refresh.",
+      "watch_points": [
+        "核心 CPI 與市場預期差異",
+        "美債殖利率與美元反應",
+        "高估值科技股折現率壓力"
+      ]
+    },
+    {
+      "id": "fomc-2026-06-16",
+      "title": "FOMC 利率決策與 SEP",
+      "event_type": "central_bank",
+      "start_date": "2026-06-16",
+      "end_date": "2026-06-17",
+      "status": "official",
+      "source_name": "Federal Reserve",
+      "source_url": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "source_note": "Federal Reserve FOMC calendar; exact date must be rechecked by source refresh.",
+      "watch_points": [
+        "利率點陣圖",
+        "Powell 對通膨與就業的說法",
+        "降息/升息預期與美債殖利率"
+      ]
+    },
+    {
+      "id": "apple-wwdc26-2026-06-08",
+      "title": "Apple WWDC26",
+      "event_type": "ai_datacenter",
+      "start_date": "2026-06-08",
+      "end_date": "2026-06-12",
+      "status": "official",
+      "source_name": "Apple Developer",
+      "source_url": "https://developer.apple.com/wwdc26/",
+      "source_note": "Apple official developer event page.",
+      "watch_points": [
+        "Apple Intelligence 與端側 AI",
+        "iPhone/Mac 平台規格變化",
+        "供應鏈需以公司公告與法說驗證"
+      ]
+    },
+    {
+      "id": "smallsat-2026-08-23",
+      "title": "Small Satellite Conference 2026",
+      "event_type": "leo_satellite",
+      "start_date": "2026-08-23",
+      "end_date": "2026-08-26",
+      "status": "official",
+      "source_name": "SmallSat",
+      "source_url": "https://smallsat.org/",
+      "source_note": "Official conference page; exact details should be rechecked by source refresh.",
+      "watch_points": [
+        "低軌衛星部署與地面終端",
+        "RF/PA/PCB/網通需求",
+        "僅作產業觀察不作受惠結論"
+      ]
+    },
+    {
+      "id": "computex-next-cycle-watch",
+      "title": "COMPUTEX / 台北國際電腦展後續題材追蹤",
+      "event_type": "ai_datacenter",
+      "start_date": "2026-06-09",
+      "end_date": "2026-12-31",
+      "status": "watch",
+      "source_name": "COMPUTEX Taipei",
+      "source_url": "https://www.computextaipei.com.tw/en/index.html",
+      "source_note": "Use official site and exhibitor/company releases. Watch window only unless an official event date or company announcement is present.",
+      "watch_points": [
+        "AI伺服器新平台",
+        "CPO/光通訊",
+        "散熱/電源新規格",
+        "ODM 出貨能見度"
+      ]
+    },
+    {
+      "id": "semicon-taiwan-watch",
+      "title": "SEMICON Taiwan / 半導體設備材料觀察",
+      "event_type": "semiconductor",
+      "start_date": "2026-07-01",
+      "end_date": "2026-12-31",
+      "status": "watch",
+      "source_name": "SEMICON Taiwan",
+      "source_url": "https://semicontaiwan.org/",
+      "source_note": "Official event site. Treat as watchlist until exact schedule/session/source is checked.",
+      "watch_points": [
+        "先進封裝設備",
+        "HBM/測試/探針卡",
+        "材料與設備訂單"
+      ]
+    },
+    {
+      "id": "robotics-physical-ai-watch-2026h2",
+      "title": "實體 AI / 人形機器人 2026 下半年商用化觀察",
+      "event_type": "robotics_physical_ai",
+      "start_date": "2026-07-01",
+      "end_date": "2026-12-31",
+      "status": "watch",
+      "source_name": "Project watchlist",
+      "source_url": "",
+      "source_note": "No single official event date. Require company IR, official product event, filing, or credible primary-source reporting before treating as confirmed.",
+      "watch_points": [
+        "機器人量產或試產訊號",
+        "馬達/傳動/控制供應鏈",
+        "低基期標的需有營收或財報驗證"
+      ]
+    },
+    {
+      "id": "autonomous-vehicle-robotaxi-watch-2026h2",
+      "title": "Robotaxi / 自動駕駛監管與商轉觀察",
+      "event_type": "autonomous_vehicle",
+      "start_date": "2026-07-01",
+      "end_date": "2026-12-31",
+      "status": "watch",
+      "source_name": "Regulatory and company filing watchlist",
+      "source_url": "",
+      "source_note": "Watch only. Confirm with regulator approval, company release, safety data, or filing.",
+      "watch_points": [
+        "監管核准",
+        "事故/安全數據",
+        "車用 AI 與車用 PCB/散熱/電源"
+      ]
+    },
+    {
+      "id": "ipo-ai-robotics-watch-2026h2",
+      "title": "AI / 機器人 / 自動車代表性 IPO 觀察",
+      "event_type": "ipo_capital_market",
+      "start_date": "2026-07-01",
+      "end_date": "2026-12-31",
+      "status": "watch",
+      "source_name": "SEC EDGAR / TWSE / TPEx watchlist",
+      "source_url": "https://www.sec.gov/search-filings",
+      "source_note": "Track S-1, F-1, 424B4, EFFECT and exchange notices. Do not infer IPO timing without filings.",
+      "watch_points": [
+        "S-1/F-1 是否送件",
+        "同題材估值錨定",
+        "台股概念股需回到基本面證據"
+      ]
+    },
+    {
+      "id": "eia-energy-weekly-watch",
+      "title": "EIA 能源庫存與油價風險週期觀察",
+      "event_type": "energy_commodities",
+      "start_date": "2026-06-09",
+      "end_date": "2026-12-31",
+      "status": "watch",
+      "source_name": "U.S. Energy Information Administration",
+      "source_url": "https://www.eia.gov/reports/upcoming.php",
+      "source_note": "Recurring official data watch. Use exact release pages for decisions.",
+      "watch_points": [
+        "原油/成品油庫存",
+        "油價與運費",
+        "材料成本與毛利率壓力"
+      ]
+    },
+    {
+      "id": "geopolitical-shipping-risk-watch",
+      "title": "戰爭 / 航道 / 制裁與供應鏈風險觀察",
+      "event_type": "geopolitical_risk",
+      "start_date": "2026-06-09",
+      "end_date": "2026-12-31",
+      "status": "watch",
+      "source_name": "MARAD / UKMTO / official advisories",
+      "source_url": "https://www.maritime.dot.gov/msci-advisories",
+      "source_note": "Watch official advisories and credible media. Do not convert unverified conflict reports into facts.",
+      "watch_points": [
+        "紅海/重要航道風險",
+        "制裁與出口管制",
+        "保險/運費/交期"
+      ]
+    },
+    {
+      "id": "taiwan-export-orders-watch",
+      "title": "台灣外銷訂單 / 工業生產 / 景氣資料觀察",
+      "event_type": "taiwan_macro_industry",
+      "start_date": "2026-06-09",
+      "end_date": "2026-12-31",
+      "status": "watch",
+      "source_name": "Taiwan official statistics / MOEA",
+      "source_url": "https://www.moea.gov.tw/Mns/dos_e/content/Content.aspx?menu_id=6747&sub_menu_id=21033",
+      "source_note": "Use official release calendar and MOEA pages for exact dates.",
+      "watch_points": [
+        "電子零組件接單",
+        "資訊通信產品",
+        "出口訂單與 AI 伺服器拉貨"
+      ]
+    }
+  ]
+}

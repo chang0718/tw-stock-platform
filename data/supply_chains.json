@@ -1,0 +1,1661 @@
+{
+  "schema_version": 2,
+  "chains": [
+    {
+      "id": "ai_server_supply_chain",
+      "name": "AI 伺服器供應鏈",
+      "concepts": [
+        "AI 伺服器",
+        "先進封裝 / CoWoS",
+        "散熱 / 電源",
+        "PCB / ABF 載板",
+        "光通訊 / CPO"
+      ],
+      "nodes": [
+        {
+          "stage": "上游",
+          "name": "ASIC / IP / GPU 平台 / HBM 相關",
+          "evidence_required": [
+            "客戶 roadmap",
+            "公司公告",
+            "法說會"
+          ],
+          "companies": [
+            {
+              "ticker": "3661",
+              "name": "世芯-KY",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "ASIC/IP設計",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "3443",
+              "name": "創意",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "ASIC/IP設計",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2454",
+              "name": "聯發科",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "IC設計平台",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2379",
+              "name": "瑞昱",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "IC設計平台",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            }
+          ]
+        },
+        {
+          "stage": "中游",
+          "name": "ABF / CCL / PCB 材料",
+          "evidence_required": [
+            "產能",
+            "認證",
+            "月營收"
+          ],
+          "companies": [
+            {
+              "ticker": "3037",
+              "name": "欣興",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "ABF/高階載板",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "8046",
+              "name": "南電",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "ABF/高階載板",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2383",
+              "name": "台光電",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "高階CCL",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "6274",
+              "name": "台燿",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "高階CCL",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            }
+          ]
+        },
+        {
+          "stage": "中游",
+          "name": "主板 / PCB / 交換器 / 光通訊",
+          "evidence_required": [
+            "出貨",
+            "規格升級",
+            "客戶訂單"
+          ],
+          "companies": [
+            {
+              "ticker": "3037",
+              "name": "欣興",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "PCB/載板觀察",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2313",
+              "name": "華通",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "PCB供應",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2368",
+              "name": "金像電",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "伺服器PCB",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2345",
+              "name": "智邦",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "交換器平台",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "3081",
+              "name": "聯亞",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "光通訊元件",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "4979",
+              "name": "華星光",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "光通訊模組",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            }
+          ]
+        },
+        {
+          "stage": "中游",
+          "name": "散熱 / 液冷 / 電源 / 機構件",
+          "evidence_required": [
+            "產品漲價",
+            "新平台導入",
+            "毛利率改善"
+          ],
+          "companies": [
+            {
+              "ticker": "3017",
+              "name": "奇鋐",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "散熱模組",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "3324",
+              "name": "雙鴻",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "散熱模組",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2421",
+              "name": "建準",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "風扇/散熱",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "3653",
+              "name": "健策",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "均熱/機構件",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2308",
+              "name": "台達電",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "電源管理",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "6412",
+              "name": "群電",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "電源供應",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            }
+          ]
+        },
+        {
+          "stage": "下游",
+          "name": "ODM / EMS / 雲端資料中心",
+          "evidence_required": [
+            "capex",
+            "backlog",
+            "出貨能見度"
+          ],
+          "companies": [
+            {
+              "ticker": "2382",
+              "name": "廣達",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "AI伺服器ODM",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "3231",
+              "name": "緯創",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "AI伺服器ODM",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "6669",
+              "name": "緯穎",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "雲端ODM",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2317",
+              "name": "鴻海",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "EMS/ODM平台",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2356",
+              "name": "英業達",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "伺服器ODM",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2324",
+              "name": "仁寶",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "伺服器/邊緣裝置",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "semiconductor_supply_chain",
+      "name": "半導體 / 晶圓 / 封測供應鏈",
+      "concepts": [
+        "半導體",
+        "先進製程",
+        "先進封裝",
+        "設備材料"
+      ],
+      "nodes": [
+        {
+          "stage": "上游",
+          "name": "矽晶圓 / 再生晶圓 / 材料",
+          "evidence_required": [
+            "價格",
+            "稼動率",
+            "長約"
+          ],
+          "companies": [
+            {
+              "ticker": "6488",
+              "name": "環球晶",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "矽晶圓",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "8028",
+              "name": "昇陽半導體",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "再生晶圓/薄化",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "3131",
+              "name": "弘塑",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "濕製程設備",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            }
+          ]
+        },
+        {
+          "stage": "中游",
+          "name": "晶圓代工 / 先進製程",
+          "evidence_required": [
+            "技術節點",
+            "capex",
+            "稼動率"
+          ],
+          "companies": [
+            {
+              "ticker": "2330",
+              "name": "台積電",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "晶圓代工",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2303",
+              "name": "聯電",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "成熟製程代工",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "3661",
+              "name": "世芯-KY",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "ASIC設計服務",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "3443",
+              "name": "創意",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "ASIC設計服務",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            }
+          ]
+        },
+        {
+          "stage": "下游",
+          "name": "封裝 / 測試 / 探針卡",
+          "evidence_required": [
+            "產能",
+            "設備訂單",
+            "測試需求"
+          ],
+          "companies": [
+            {
+              "ticker": "3711",
+              "name": "日月光投控",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "封測",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "6239",
+              "name": "力成",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "記憶體/邏輯封測",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2449",
+              "name": "京元電子",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "測試",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "6510",
+              "name": "精測",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "探針卡/測試介面",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "leo_satellite_supply_chain",
+      "name": "低軌衛星 / 通訊供應鏈",
+      "concepts": [
+        "低軌衛星",
+        "通訊模組",
+        "RF",
+        "地面終端"
+      ],
+      "nodes": [
+        {
+          "stage": "上游",
+          "name": "RF / PA / 通訊晶片",
+          "evidence_required": [
+            "認證",
+            "客戶平台",
+            "出貨"
+          ],
+          "companies": [
+            {
+              "ticker": "3491",
+              "name": "昇達科",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "RF/微波元件",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2454",
+              "name": "聯發科",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "通訊晶片",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2379",
+              "name": "瑞昱",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "網通晶片",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            }
+          ]
+        },
+        {
+          "stage": "中游",
+          "name": "PCB / 電源 / 散熱",
+          "evidence_required": [
+            "料號導入",
+            "規格",
+            "訂單"
+          ],
+          "companies": [
+            {
+              "ticker": "2313",
+              "name": "華通",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "高頻PCB",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2308",
+              "name": "台達電",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "電源",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "3017",
+              "name": "奇鋐",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "散熱",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "3324",
+              "name": "雙鴻",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "散熱",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            }
+          ]
+        },
+        {
+          "stage": "下游",
+          "name": "地面終端 / 網通設備 / EMS",
+          "evidence_required": [
+            "客戶公告",
+            "出貨",
+            "認證"
+          ],
+          "companies": [
+            {
+              "ticker": "2317",
+              "name": "鴻海",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "EMS/終端組裝",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2324",
+              "name": "仁寶",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "終端設備",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2345",
+              "name": "智邦",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "網通交換器",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "3596",
+              "name": "智易",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "網通設備",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "robotics_supply_chain",
+      "name": "機器人 / 實體 AI 供應鏈",
+      "concepts": [
+        "實體AI",
+        "機器人",
+        "自動化",
+        "馬達/控制"
+      ],
+      "nodes": [
+        {
+          "stage": "上游",
+          "name": "控制晶片 / 感測 / AI 邊緣運算",
+          "evidence_required": [
+            "平台",
+            "設計導入",
+            "量產"
+          ],
+          "companies": [
+            {
+              "ticker": "2454",
+              "name": "聯發科",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "邊緣AI晶片",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2379",
+              "name": "瑞昱",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "控制/連網晶片",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2308",
+              "name": "台達電",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "工控/電源",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            }
+          ]
+        },
+        {
+          "stage": "中游",
+          "name": "線性滑軌 / 傳動 / 馬達 / 機構件",
+          "evidence_required": [
+            "產品規格",
+            "客戶導入",
+            "毛利率"
+          ],
+          "companies": [
+            {
+              "ticker": "2049",
+              "name": "上銀",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "線性傳動",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "1590",
+              "name": "亞德客-KY",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "氣動元件",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "3379",
+              "name": "彬台",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "工具機/自動化",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2354",
+              "name": "鴻準",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "機構件",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            }
+          ]
+        },
+        {
+          "stage": "下游",
+          "name": "組裝 / 系統整合 / EMS",
+          "evidence_required": [
+            "量產證據",
+            "客戶公告",
+            "出貨"
+          ],
+          "companies": [
+            {
+              "ticker": "2317",
+              "name": "鴻海",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "機器人/EMS平台",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2356",
+              "name": "英業達",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "系統組裝",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "6412",
+              "name": "群電",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "電源模組",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "autonomous_vehicle_supply_chain",
+      "name": "自動車 / Robotaxi / 車用 AI 供應鏈",
+      "concepts": [
+        "自動駕駛",
+        "Robotaxi",
+        "車用AI",
+        "ADAS"
+      ],
+      "nodes": [
+        {
+          "stage": "上游",
+          "name": "車用晶片 / 感測 / 連網",
+          "evidence_required": [
+            "車規認證",
+            "設計導入",
+            "平台公告"
+          ],
+          "companies": [
+            {
+              "ticker": "2454",
+              "name": "聯發科",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "車用/通訊晶片",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2379",
+              "name": "瑞昱",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "車用乙太網/連網",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2308",
+              "name": "台達電",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "車電/電源",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            }
+          ]
+        },
+        {
+          "stage": "中游",
+          "name": "車用 PCB / 散熱 / 電源",
+          "evidence_required": [
+            "認證",
+            "出貨",
+            "客戶"
+          ],
+          "companies": [
+            {
+              "ticker": "2313",
+              "name": "華通",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "車用PCB",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "3037",
+              "name": "欣興",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "載板/PCB",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "3017",
+              "name": "奇鋐",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "散熱",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "3324",
+              "name": "雙鴻",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "散熱",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "energy_commodities_cost_chain",
+      "name": "能源 / 原物料 / 航運成本鏈",
+      "concepts": [
+        "原油",
+        "天然氣",
+        "銅/鋁/稀土",
+        "航運",
+        "毛利率"
+      ],
+      "nodes": [
+        {
+          "stage": "上游",
+          "name": "石油 / 天然氣 / 電力 / 銅 / 鋁 / 稀土",
+          "evidence_required": [
+            "官方庫存",
+            "價格資料",
+            "政策公告"
+          ],
+          "companies": []
+        },
+        {
+          "stage": "中游",
+          "name": "材料成本 / 運費 / 保險 / 交期",
+          "evidence_required": [
+            "報價",
+            "航運資料",
+            "公司成本說明"
+          ],
+          "companies": [
+            {
+              "ticker": "2383",
+              "name": "台光電",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "CCL材料成本敏感",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "6274",
+              "name": "台燿",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "CCL材料成本敏感",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "8358",
+              "name": "金居",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "銅箔材料",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "1815",
+              "name": "富喬",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "玻纖/材料",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            }
+          ]
+        },
+        {
+          "stage": "下游",
+          "name": "硬體製造毛利率 / 終端 ASP",
+          "evidence_required": [
+            "財報",
+            "毛利率",
+            "價格轉嫁能力"
+          ],
+          "companies": [
+            {
+              "ticker": "2382",
+              "name": "廣達",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "硬體製造毛利率",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "3231",
+              "name": "緯創",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "硬體製造毛利率",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "6669",
+              "name": "緯穎",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "硬體製造毛利率",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "3037",
+              "name": "欣興",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "材料成本觀察",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "advanced_packaging_chain",
+      "name": "先進封裝 / HBM / CPO 細分鏈",
+      "concepts": [
+        "先進封裝 / CoWoS",
+        "HBM",
+        "CPO",
+        "PCB / ABF 載板",
+        "散熱 / 電源"
+      ],
+      "nodes": [
+        {
+          "stage": "上游",
+          "name": "HBM / 中介層 / ABF / 載板材料",
+          "evidence_required": [
+            "HBM供應",
+            "封裝產能",
+            "材料報價"
+          ],
+          "companies": [
+            {
+              "ticker": "3037",
+              "name": "欣興",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "ABF/載板",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "8046",
+              "name": "南電",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "ABF/載板",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2383",
+              "name": "台光電",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "高階CCL",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "6274",
+              "name": "台燿",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "高階CCL",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            }
+          ]
+        },
+        {
+          "stage": "中游",
+          "name": "CoWoS / SoIC / 2.5D / 測試",
+          "evidence_required": [
+            "技術roadmap",
+            "產能",
+            "設備訂單"
+          ],
+          "companies": [
+            {
+              "ticker": "2330",
+              "name": "台積電",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "先進封裝平台",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "3711",
+              "name": "日月光投控",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "封測",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "2449",
+              "name": "京元電子",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "測試",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "6510",
+              "name": "精測",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "測試介面",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            }
+          ]
+        },
+        {
+          "stage": "下游",
+          "name": "GPU / ASIC / AI 加速器平台",
+          "evidence_required": [
+            "官方平台",
+            "客戶量產",
+            "出貨證據"
+          ],
+          "companies": [
+            {
+              "ticker": "3661",
+              "name": "世芯-KY",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "ASIC設計",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            },
+            {
+              "ticker": "3443",
+              "name": "創意",
+              "market": "TWSE/TPEx",
+              "monitoring_role": "ASIC設計",
+              "evidence_status": "watchlist_only",
+              "verification_status": "needs_primary_verification",
+              "required_evidence": [
+                "月營收",
+                "財報",
+                "法說會",
+                "公告",
+                "客戶/供應鏈原始證據"
+              ],
+              "notes": "僅作觀察名單；需 primary source 交叉驗證後才能提升可信度。"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

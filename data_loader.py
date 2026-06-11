@@ -119,81 +119,70 @@ class MarketDataLoader:
             st.warning(f"⚠️ 上市收盤價 API 失敗（{type(e).__name__}）: {e}")
             return []
     
+    def _fetch_tpex_raw(self) -> List[Dict]:
+        """
+        載入上櫃每日收盤行情原始資料（daily_close_quotes 端點，含代號＋名稱＋收盤＋成交股數）。
+        單次抓取後快取於 self，供 fetch_tpex_companies / fetch_tpex_daily 共用，避免重複呼叫。
+        """
+        if getattr(self, "_tpex_raw", None) is not None:
+            return self._tpex_raw
+        try:
+            response = self.session.get(
+                API_ENDPOINTS["tpex_daily"],
+                timeout=HTTP_CONFIG["timeout"]
+            )
+            response.raise_for_status()
+            data = response.json()
+            self._tpex_raw = data if isinstance(data, list) else []
+        except Exception as e:
+            st.warning(f"⚠️ 上櫃資料 API 失敗（{type(e).__name__}）: {e}")
+            self._tpex_raw = []
+        return self._tpex_raw
+
     def fetch_tpex_companies(self) -> List[Dict]:
         """
-        載入上櫃公司清單
-        
+        載入上櫃公司清單（由 daily_close_quotes 派生：取 4 碼數字代號＋公司名稱）。
+        該端點無產業別欄位，產業別以「其他」帶入（供應鏈分組改由 config 代號清單決定，不受影響）。
+
         Returns:
             公司列表
         """
-        try:
-            response = self.session.get(
-                API_ENDPOINTS["tpex_company"],
-                timeout=HTTP_CONFIG["timeout"]
-            )
-            response.raise_for_status()
-            data = response.json()
-            
-            # TPEx API 格式轉換為標準格式
-            companies = []
-            for item in data:
+        companies = []
+        seen = set()
+        for item in self._fetch_tpex_raw():
+            code = str(item.get("SecuritiesCompanyCode", "")).strip()
+            if len(code) == 4 and code.isdigit() and code not in seen:
+                seen.add(code)
                 companies.append({
-                    "公司代號": item.get("SecuritiesCompanyCode", ""),
-                    "公司名稱": item.get("CompanyName", ""),
-                    "產業別": item.get("IndustryCategory", ""),
+                    "公司代號": code,
+                    "公司名稱": str(item.get("CompanyName", "")).strip(),
+                    "產業別": "其他",
                 })
-            
-            return companies
-        except Exception as e:
-            st.warning(f"⚠️ 無法載入上櫃公司清單: {e}")
-            return []
-    
+        return companies
+
     def fetch_tpex_daily(self) -> Dict:
         """
-        載入上櫃盤後行情
-        
+        載入上櫃盤後行情（由 daily_close_quotes 派生）。
+
         Returns:
-            股票代碼到行情的對照表
+            股票代碼到行情的對照表（close / change_pct / volume[張]）
         """
-        try:
-            from datetime import datetime
-            
-            # TPEx的API需要日期參數
-            today = datetime.now().strftime("%Y%m%d")
-            params = {
-                "response": "json",
-                "date": today,
+        daily_map = {}
+        for item in self._fetch_tpex_raw():
+            ticker = str(item.get("SecuritiesCompanyCode", "")).strip()
+            if len(ticker) != 4 or not ticker.isdigit():
+                continue
+            close = to_number(item.get("Close"))
+            change = to_number(item.get("Change"))
+            shares = to_number(item.get("TradingShares"))  # 成交股數（股）
+            prev_close = max(1, close - change)
+            change_pct = round(change / prev_close * 100, 2) if close else 0
+            daily_map[ticker] = {
+                "close": close,
+                "change_pct": change_pct,
+                "volume": int(shares // 1000),  # 股 → 張
             }
-            
-            response = self.session.get(
-                API_ENDPOINTS["tpex_daily"],
-                params=params,
-                timeout=HTTP_CONFIG["timeout"]
-            )
-            response.raise_for_status()
-            
-            data = response.json()
-            daily_map = {}
-            
-            # 解析TPEx格式
-            if "data" in data:
-                for row in data["data"]:
-                    if len(row) >= 3:
-                        ticker = str(row[0]).strip()
-                        close = to_number(row[2])
-                        change = to_number(row[3]) if len(row) > 3 else 0
-                        volume = to_number(row[7]) if len(row) > 7 else 0
-                        
-                        daily_map[ticker] = {
-                            "close": close,
-                            "change": change,
-                            "volume": volume,
-                        }
-            
-            return daily_map
-        except Exception as e:
-            st.warning(f"⚠️ 上櫃收盤價 API 失敗（{type(e).__name__}）: {e}")
-            return {}
+        return daily_map
     
     def parse_twse_daily(self, daily_rows: List[Dict]) -> Tuple[Dict, str]:
         """
@@ -245,7 +234,7 @@ class MarketDataLoader:
             daily_map[ticker] = {
                 "close": close,
                 "change_pct": change_pct,
-                "volume": int(volume),
+                "volume": int(volume // 1000),  # 成交股數（股）→ 張，與顯示單位一致
             }
 
         return daily_map, data_date
@@ -305,7 +294,7 @@ class MarketDataLoader:
                 "ticker": ticker,
                 "name": name,
                 "industry": industry,
-                "group": industry_group(industry),
+                "group": industry_group(industry, ticker, name),
                 "market": market,
                 "daily": daily,
             })
@@ -326,7 +315,7 @@ class MarketDataLoader:
                 "ticker": ticker,
                 "name": name,
                 "industry": industry,
-                "group": industry_group(industry),
+                "group": industry_group(industry, ticker, name),
                 "market": market,
                 "daily": {
                     "close": close,
@@ -426,7 +415,7 @@ class MarketDataLoader:
                     "ticker": ticker,
                     "name": str(row["name"]),
                     "industry": str(row["industry"]),
-                    "group": industry_group(str(row["industry"])),
+                    "group": industry_group(str(row["industry"]), ticker, str(row["name"])),
                     "market": row.get("market", "自訂"),
                     "daily": {
                         "close": to_number(row["close"]),

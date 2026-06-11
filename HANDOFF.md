@@ -1,7 +1,6 @@
 # 台股分析平台 — 對話交接文件
 
-> 最後更新：2026-05-26（Phase A-G 全面優化完成）
-> 建立時間：2026-05-12  
+> 最後更新：2026-06-11（法人買賣超/成交量單位修正 + 供應鏈分類校正）
 > 用途：新對話繼續開發時的完整上下文
 
 ---
@@ -13,251 +12,306 @@
 | 專案路徑 | `C:\投資\tw-stock-platform_20260511` |
 | GitHub | https://github.com/chang0718/tw-stock-platform |
 | Streamlit Cloud | https://tw-stock-platform-9zxud2zaqzb758nbcinhea.streamlit.app/ |
-| 登入密碼 | scps6667 |
-| Gmail | scps960810@gmail.com |
-| 每日報告 | 週一至週五 14:30 自動寄信到 Gmail |
-| 本機啟動 | 終端執行 `.\run.ps1`，或先 `.\.venv\Scripts\Activate.ps1` 再 `streamlit run app.py` |
+| 登入密碼 | 見 `.streamlit/secrets.toml` 的 `[auth] password`（請勿寫入文件）|
+| 本機開發繞過登入 | 設定環境變數 `LOCAL_DEV=1` |
+| 本機啟動 | 終端執行 `.\run.ps1` 或 `streamlit run app.py` |
 | 本機網址 | http://localhost:8501 |
-| 手機（同WiFi）| http://172.20.10.9:8501 |
 
 ---
 
-## 零、本輪（2026-05-26）最新完成功能（尚未 git commit）
+## 二、目前平台架構（5 個 Tab，Phase 2 完成後）
 
-### 新增 Tab
+`st.tabs` 定義於 app.py 第 3361 行，各 Tab 內容以閉包函式實作（`def _render_tab_XXX():` 位於 main() 內部）：
 
-| Tab | 功能 | 核心邏輯 |
-|-----|------|---------|
-| tabs[9] 🎯 潛力股 | 落後補漲候選排行 | `quant_model.find_catchup_candidates()` — peer_lag_score × 0.35 + flow_score × 0.30 + KD/MACD × 0.20 + inst_entry × 0.15 |
-| tabs[10] 📈 ETF 排行 | ETF 月/季/年報酬率排行 | `finmind_loader.get_etf_performance()` |
-| tabs[7] 📊 產業瀏覽器 | 重構為左右兩欄 | 左=供應鏈樹+概念股按鈕，右=儀表板+股票表+產業新聞 |
-
-### Tab 0 — 新增「📡 本週市場熱點話題」expander
-
-- `config.NEWS_TO_SUPPLY_CHAIN`（12 個話題→供應鏈族群映射）
-- `news_analyzer.get_hot_topics()`（快取 2 小時）自動識別熱點話題並顯示受益族群
-
-### Tab 3 — 個股分析強化
-
-- **估值區間卡片**：`finmind_loader.get_eps_fair_value()` 顯示保守/合理/樂觀目標價（歷史 PE 25/50/75 分位 × trailing EPS）
-- **操作四區間說明**：整合技術面 S/R + PE 分位 + EPS 公平價，顯示積極買進/分批介入/觀望持有/逢高出清四區間附中文理由
-
-### 新增技術指標
-
-- `tech_analyzer.calc_kd()` — KD 指標（FastRSV→K→D）
-- `analyze()` 輸出新增 `kd_cross`、`k_val`、`d_val`
-
-### 新增評分維度（`quant_model.enrich_dataframe()`）
-
-- `peer_lag_score` — 族群平均動能 vs 個股動能差（越大越落後，補漲潛力越高）
-- `inst_entry` — 外資淨買入但 flow_score < 60（籌碼面剛開始建倉）
-- `macd_pre_cross` — MACD 柱狀圖負值收斂（黃金交叉前兆）
-
-### ⚠️ 重要開發規則（本輪兩次 bug 的教訓）
-
-**禁止在函式內部寫 `from X import Y`（尤其是 `main()` 內的 try 塊）**
-
-原因：Python 函式作用域規則讓整個 `main()` 把該名稱視為局部變數，早於 import 的呼叫會觸發 `UnboundLocalError`。
-
-驗證三步驟（每次修改後必跑）：
-```powershell
-python -m py_compile app.py && echo "語法 OK"
-python -m pytest tests/ -q              # 應為 57 passed
-grep -n "^from\|^import" app.py | head  # 確認無函式內 import
+```
+tabs[0] 🎯 候選篩選      — 子 Tab：🏆 綜合推薦 + 🎯 潛力股
+tabs[1] 🌍 情勢雷達      — 美股連動 + 宏觀指標 + 13F
+tabs[2] 🔍 個股研究      — 子 Tab：📊基本面 + 📈技術面 + 🏦籌碼 + 💬新聞/操作
+tabs[3] 🔥 主題供應鏈    — 子 Tab：🔥 熱度排行 + 📊 產業瀏覽器
+tabs[4] ⭐ 追蹤與組合    — 子 Tab：⭐追蹤清單 + 💼持倉管理 + 📈ETF排行 + ⚙️模型設定
 ```
 
----
+### 閉包函式對應表（全部在 main() 內定義，起始約行）
 
-## 二、已完成事項
+| 閉包函式 | 舊 Tab | 內容摘要 |
+|---------|--------|---------|
+| `_render_tab_overall()` | 舊 tabs[0] | Top 10 推薦 + 熱點話題 + 資金流向 + 候選清單 |
+| `_render_tab_us_market()` | 舊 tabs[1] | 美股指數 + ADR + 宏觀 + 13F |
+| `_render_tab_stock_analysis()` | 舊 tabs[2] | 個股研究 4 子 Tab（基本面/技術/籌碼/新聞）|
+| `_render_tab_portfolio()` | 舊 tabs[3] | 持倉管理 |
+| `_render_tab_watchlist()` | 舊 tabs[4] | 追蹤清單 4 子 Tab（基本面籌碼/技術/估值/筆記）|
+| `_render_tab_heat()` | 舊 tabs[5] | 產業熱度排行 |
+| `_render_tab_industry()` | 舊 tabs[6] | 產業/概念股瀏覽器 |
+| `_render_tab_settings()` | 舊 tabs[7] | 模型設定 + 備份還原 |
+| `_render_tab_potential()` | 舊 tabs[8] | 潛力補漲候選 + EPS 超越排行 |
+| `_render_tab_etf()` | 舊 tabs[9] | ETF 績效排行 |
 
-### 環境建置（SETUP_SOP.md 步驟 1-12）
-- [x] Python 3.14.5 安裝並加入 PATH
-- [x] Git 2.54.0 安裝
-- [x] VS Code 1.119.0 + Python/Pylance 擴充套件
-- [x] Node.js 24.15.0 + Claude Code CLI 2.1.138
-- [x] Python 虛擬環境 `.venv` + 所有套件（streamlit 1.57.0、pandas 3.0.2 等）
-- [x] 資料目錄確認（portfolio.json、watchlist.json、weights.json）
-- [x] `.streamlit/secrets.toml` 建立（密碼、FinMind token 欄位）
+### tabs[2]「個股研究」的子 Tab（`_stabs`）
+| 子 Tab | 內容 |
+|--------|------|
+| 📊 基本面 | 🏥健檢雷達圖（四維 0-100）+ 8指標 + 白話解讀 + 月營收/季EPS + PE/PB歷史分位 + EPS公平價 |
+| 📈 技術面 | K線圖（MA+布林）+ RSI/MACD + 購買信心指數 + 蒙地卡羅GBM + 支撐壓力 + 費波那契 |
+| 🏦 籌碼 | 今日三大法人 + 融資融券 + 20日歷史趨勢（需FinMind Token）|
+| 💬 新聞/操作 | 新聞情緒 + 個人筆記 + 即時信號彙整 |
 
-### 雲端部署
-- [x] GitHub 倉庫建立：chang0718/tw-stock-platform（Public）
-- [x] Streamlit Cloud 部署完成，有密碼保護
-- [x] Streamlit Cloud Secrets 設定（auth.password = scps6667）
-- [x] GitHub Actions：每日 14:30 自動寄 Email 報告（Gmail App Password 已設定為 GitHub Secret）
-
-### 程式碼修正
-- [x] `app.py`：加入密碼保護登入頁（`_check_password()`）
-- [x] `app.py`：`applymap` → `map`（pandas 3.x 相容）
-- [x] `app.py`：移除 headless 限制，瀏覽器自動開啟
-- [x] `app.py`：載入市場後自動累積每日收盤價到 `price_history.json`
-- [x] `app.py`：None 收盤價顯示 `--`，不顯示假資料
-- [x] `app.py`：持倉頁面 None close 不崩潰
-- [x] `data_loader.py`：移除假資料預設值（`close=100, change_pct=0, volume=1000` → `None`）
-- [x] `quant_model.py`：`enrich_company` 正確處理 None close
-- [x] `quant_model.py`：技術指標計算加 None 防護
-- [x] `scripts/daily_report.py`：改用 Gmail SMTP 寄信（原為 LINE Notify）
-- [x] `.github/workflows/daily_report.yml`：觸發時間改為 14:30 台灣時間
-- [x] `.streamlit/config.toml`：修正 CORS/XSRF 警告
-- [x] `run.ps1`：新增終端快速啟動腳本
-- [x] `USER_SOP.md`：使用說明與換機還原 SOP
+### tabs[4]「追蹤與組合」→ ⭐追蹤清單 子 Tab（`_wl_stabs`）
+| 子 Tab | 內容 |
+|--------|------|
+| 📊 基本面/籌碼 | 健檢雷達圖 + 基本面 + 籌碼 + 續抱評估 |
+| 📈 技術面 | K線 + 操作區間 + 蒙地卡羅 + 購買信心指數 |
+| ⚖️ 估值/操作 | PE/PB/殖利率歷史分位 + EPS公平價 |
+| 💬 新聞/筆記 | 新聞情緒 + 個人研究筆記 |
 
 ---
 
-## 三、待辦事項（新對話繼續）
+## 三、核心 Python 模組（共 19 個）
 
-### ✅ 已完成（2026-05-12）
+### 主程式與架構層
 
-- [x] **廢棄檔清理**：刪除未使用的 `financials.py`、`news.py`，更新 `pack.ps1`
-- [x] **冷啟動腳本**：新增 `scripts/init_price_history.py`
-- [x] **雙擊啟動**：新增 `start.bat`
-- [x] **TOP5 每日報告**：新增 `scripts/run_model.py`，更新 `daily_report.yml`
-- [x] **SSL 修正**：`utils.py` → `session.verify = False`（台灣政府 API 憑證缺少 Subject Key Identifier）
-- [x] **行情 / 公司清單分離**：即使 TWSE 盤後 API 空白也能載入公司名稱
-- [x] **`_probit` 修正**：移除不存在的 `math.erfinv`，改用 Acklam rational approximation
-- [x] **pytest 測試**：`tests/test_quant_model.py` + `tests/test_data_loader.py`（52 tests 全過）
-- [x] **docs/ 文件**：7 份系統文件（`docs/00` 到 `docs/06`）
+| 模組 | 行數 | 功能 |
+|------|------|------|
+| `app.py` | 3,450+ | Streamlit 主程式（5 個 Tab，閉包方案）— render 函式已移至 components/ |
+| `state.py` | ~55 | 全域 session_state 初始化（從 app.py 抽離）|
+| `radar_loader.py` | ~220 | RadarLoader：整合事件日程 + 主題熱度 + 宏觀快照 |
 
-### 🔴 高優先（影響使用體驗）
+### 元件層（components/）— 2026-06-08 新建
 
-1. **git commit 尚未提交的 6 個檔案**：`app.py`, `config.py`, `finmind_loader.py`, `news_analyzer.py`, `quant_model.py`, `tech_analyzer.py`（共 +812/-324 行）
-
-2. **收盤價仍可能為 N/A**
-   - TWSE API 偶爾在非交易日或剛開盤時回傳空行情
-   - **待辦**：平日盤後（14:30-15:30）載入全市場，確認收盤價正確顯示
-
-### 🟡 中優先（功能改善）
-
-3. **FinMind Token 設定**
-   - `secrets.toml` 裡 `token = "your_finmind_token_here"` 尚未填入真實 token
-   - 影響：台股基本面（月營收、季報、本益比）以 yfinance 備援，部分資料可能缺失
-   - **待辦**：到 finmindtrade.com 免費註冊取得 token，填入 `.streamlit/secrets.toml` 和 Streamlit Cloud Secrets（Secret 名稱：`FINMIND_TOKEN`）
-
-4. **GitHub Actions 需新增 FINMIND_TOKEN Secret（選用）**
-   - `daily_report.yml` 已加入 `FINMIND_TOKEN` 環境變數
-   - 若不設定則 Actions 改用 yfinance 備援，功能仍可運作
-
-5. **資料準確度確認**
-   - **待辦**：平日盤後實際測試，確認模型 TOP5、收盤價、基本面數字是否合理
-
-### 🟢 低優先（長期改善）
-
-6. **模型水泥股問題**：TOP5 仍可能被無基本面小股票佔據，需調整評分權重
-
-7. **KD 批次計算限制**：`enrich_dataframe()` 中 `kd_cross` 預設 False，因為 `price_history` 只有 close（無 OHLCV）。真實 KD 只在 Tab 3 個股分析時計算。
-
-8. **Tab 3 估值卡片**：目前用 trailing EPS，未來可加入分析師 forward EPS 估算
-
-9. **Streamlit Cloud 資料持久化**：自選股、持倉在雲端重啟後消失，需外部儲存（Google Sheets、Supabase 等）
-
-   **自選股儲存說明**：
-   - **本機執行**：`tw_quant_data/watchlist.json` 持久存在磁碟，關閉平台後資料仍在
-   - **Streamlit Cloud**：檔案系統為 ephemeral，每次重啟（約每 7 天或閒置後）`watchlist.json` 消失
-   - `tw_quant_data/` 在 `.gitignore` 裡，不會上傳 GitHub，也不會從雲端同步回來
-   - **解法**（未來）：改用 Google Sheets API 或 Supabase 儲存自選股清單
-
-8. **美股資料錯誤**：yfinance 延遲 15 分鐘，部分美股指數資料有問題，需排查
-
----
-
-## 四、關鍵檔案說明
-
-| 檔案 | 說明 |
+| 模組 | 功能 |
 |------|------|
-| `app.py` | 主程式（~2900 行），11-Tab UI 邏輯 |
-| `quant_model.py` | 六因子量化模型（跨截面 Z-score） |
-| `data_loader.py` | TWSE / TPEx 市場資料載入 |
-| `finmind_loader.py` | FinMind API + yfinance 基本面（含 7 天快取） |
-| `twse_institutional.py` | 三大法人、融資融券 |
-| `signal_engine.py` | 買賣訊號生成 |
-| `portfolio.py` | 持倉管理 |
-| `tech_analyzer.py` | 技術指標（MA/RSI/MACD/KD/Bollinger/ATR/Fibonacci）|
-| `news_analyzer.py` | 新聞爬取、情緒分析、熱點話題 |
-| `config.py` | 供應鏈樹、概念股、ETF 清單、NEWS_TO_SUPPLY_CHAIN 映射 |
-| `tw_quant_data/` | 個人資料（持倉、自選股、快照、歷史價格） |
-| `.streamlit/secrets.toml` | 本機敏感設定（密碼、token）— 不上傳 GitHub |
-| `run.ps1` | PowerShell 啟動腳本 |
-| `start.bat` | 雙擊啟動腳本（不需開 PowerShell）|
-| `scripts/init_price_history.py` | 冷啟動：批次下載前100大台股60天歷史 |
-| `scripts/run_model.py` | GitHub Actions 用：執行模型生成快照 |
-| `scripts/daily_report.py` | 每日報告寄信 |
-| `SETUP_SOP.md` | 環境建置 SOP |
-| `USER_SOP.md` | 使用說明與換機 SOP |
+| `components/fundamental_blocks.py` | `render_fundamental_block()` + `render_health_check_block()` |
+| `components/technical_blocks.py` | `render_tech_block()` |
+| `components/flow_blocks.py` | `render_flow_block()` |
+| `components/news_blocks.py` | `render_news_block()` |
+| `components/radar_blocks.py` | `render_theme_cards()` + `render_event_calendar()` + `render_macro_bar()` |
+
+### 服務層（services/）— 2026-06-08 新建
+
+| 模組 | 功能 |
+|------|------|
+| `services/persistence_service.py` | `validate_backup()` + `preview_backup()` + `restore_backup()`（schema 驗證 + atomic 寫入）|
+
+### 資料與分析模組（維持不動）
+
+| 模組 | 行數 | 功能 |
+|------|------|------|
+| `quant_model.py` | 788 | 六因子跨截面 Z-score 量化評分 + `health_check_score()` + `monte_carlo_price()` + `find_catchup_candidates()` + `top_by_group()` |
+| `finmind_loader.py` | 690 | yfinance 主力 + FinMind 補月營收 + `get_financial_trend()` + `get_revenue_trend()` + `get_per_trend()` + `get_valuation_percentile()` + `get_eps_fair_value()` + `get_eps_breakout()` |
+| `tech_analyzer.py` | 397 | 技術分析（ATR/布林/支撐壓力/費波那契/KD/MACD/RSI）|
+| `news_analyzer.py` | 566 | RSS 新聞 + `get_hot_topics()` + `get_theme_heat()` + `get_fund_flow_signals()` |
+| `signal_engine.py` | 171 | 買賣訊號（支援 `fund_data=` 參數覆蓋快照）|
+| `twse_institutional.py` | 235 | TWSE 三大法人（並行載入，硬性 12 秒超時保護）|
+| `backtest.py` | 571 | 回測 + `bootstrap_model_confidence()` |
+| `config.py` | 372 | 常數：SUPPLY_CHAIN_TREE / SUPPLY_CHAIN_GROUPS / CONCEPT_STOCKS / PRICE_THEMES / NEWS_TO_SUPPLY_CHAIN |
+| `portfolio.py` | 132 | 持倉管理（add/remove/calculate_pnl）|
+| `us_market.py` | 471 | 美股資料 + US_TW_SUPPLY_CHAIN + TW_INDUSTRY_CHAIN + US_INDICES + US_KEY_STOCKS |
+| `utils.py` | ~330 | 共用工具（format_percentage / read_json / write_json[atomic] / clamp / sigmoid / to_number）|
+| `data_loader.py` | 421 | MarketDataLoader — TWSE/TPEx OpenAPI 統一載入介面 |
+| `macro_loader.py` | 232 | MacroLoader — 宏觀指標（FED、美債、DXY 等）|
+| `institutional_tracker.py` | 165 | InstitutionalTracker + TRACKED_FUNDS（13F 機構持倉追蹤）|
 
 ---
 
-## 五、整合測試步驟
+## 四、關鍵 render 函式（已移至 components/）
 
-### 步驟 1 — 合併三個 PR（GitHub 上操作）
-依序合併以下 PR（在 GitHub 上 Merge Pull Request）：
-1. `feat/init-price-history` → 建立 PR: https://github.com/chang0718/tw-stock-platform/pull/new/feat/init-price-history
-2. `feat/start-bat` → 建立 PR: https://github.com/chang0718/tw-stock-platform/pull/new/feat/start-bat
-3. `feat/fix-daily-report-top5` → 建立 PR: https://github.com/chang0718/tw-stock-platform/pull/new/feat/fix-daily-report-top5
+⚠️ 這些函式已從 app.py 抽離至 components/，app.py 頂部以 import 引用：
 
-合併後執行 `git pull origin main` 拉到本機。
+| 函式 | 位置 | 功能 |
+|------|------|------|
+| `render_health_check_block(fund, fin_trend, val_pct, epsfv, compact=False)` | `components/fundamental_blocks.py` | 四維健檢（總評橫幅 + 進度條 + 雷達圖 + 明細術語解說）|
+| `render_fundamental_block(fund)` | `components/fundamental_blocks.py` | 8指標 metric + 白話解讀 |
+| `render_flow_block(stock, show_reload=False)` | `components/flow_blocks.py` | 三大法人今日 + 融資券（單位：張）|
+| `render_tech_block(ta, stock)` | `components/technical_blocks.py` | K線四合一 subplot + 購買信心指數 + 支撐壓力 + 費波那契 |
+| `render_news_block(news_dict)` | `components/news_blocks.py` | 新聞情緒 + 新聞列表 |
+| `render_sidebar(universe_df)` | `app.py`（保留）| 側邊欄篩選條件（依賴 load_market_data_action，暫不抽離）|
 
-### 步驟 2 — 冷啟動歷史資料（本機執行一次）
+---
+
+## 五、模型計算核心邏輯（app.py 第 1025~1101 行）
+
+```python
+model_df["final_composite"] = (
+    model_df["prob20"]           * 0.40   # 20日上漲機率
+    + model_df["confidence"]     * 0.25   # 模型信心度
+    + (100 - model_df["risk_score"]) * 0.20  # 風險反轉
+    + model_df["composite_score"] * 0.15   # 六因子加權分
+    + group_boost_series                   # 偏好產業 +4 分
+    + completeness_bonus_series            # 真實數據 +3 分
+    + news_adj_series                      # 新聞情緒 ±5 分
+    + fund_quality_series                  # 基本面品質 +0~+12 分
+)
+```
+
+**基本面品質加成規則（最高 +12）：**
+- EPS YoY > 30%：+4；> 15%：+2.5；> 0%：+1
+- 營收 YoY > 20%：+3；> 5%：+1.5
+- 毛利率 > 40%：+2.5；> 25%：+1
+- 淨利率 > 10%：+2.5
+
+---
+
+## 六、FinMindLoader 關鍵實作細節
+
+- **EPS**：近四季合計（TTM），非最新單季
+- **EPS YoY**：TTM now vs TTM prev（日期比對，非位置索引）
+- **月營收 YoY/MoM**：日期比對（避免缺月誤差）
+- **yfinance 優先**：主力基本面用 Yahoo Finance，補 FinMind 月營收（YoY/MoM）
+- **快取 TTL**：7 天（finmind_cache.json）
+
+---
+
+## 六-B、data/ 目錄（Phase 3 新增）
+
+JSON 配置來源：`C:\TaiwanTechNewsMonitor\config\`（人工同步，不自動更新）
+
+| 檔案 | 內容 | 主要用途 |
+|------|------|---------|
+| `supply_chains.json` | 9 條供應鏈，含上/中/下游節點 + 台股 ticker | THEME_GRAPH drill-down |
+| `events.json` | 11 類全球事件 + 傳導方向 | 事件日程分類 |
+| `event_to_supply_chain_rules.json` | 10 條傳導規則 | 事件→受影響供應鏈 |
+| `future_events.json` | 22 個種子事件 + 5 個時間窗口 | 未來事件日程 |
+| `future_event_sources.json` | 28 個官方來源（Fed/BLS/Apple/TSMC 等）| 事件來源追蹤 |
+| `concepts.json` | AI伺服器、先進封裝等垂直分類 + 子產業 + 台股 | 概念股詳細展開 |
+
+---
+
+## 七、資料快取機制
+
+| 快取 | 位置 | TTL |
+|------|------|-----|
+| FinMind 基本面/月營收/季報 | `tw_quant_data/finmind_cache.json` | 7 天 |
+| 新聞情緒 | `tw_quant_data/news_cache.json` | 1 小時 |
+| 三大法人/融資券 | `tw_quant_data/institutional_cache.json` | 1 天 |
+| 技術分析 OHLCV | `tw_quant_data/finmind_cache.json` 內 | 1 天 |
+| 本機價格歷史 | `tw_quant_data/price_history.json` | 每日累積（保留 300 天）|
+| 市場行情 | `tw_quant_data/market_cache.json` | 當日 |
+| Streamlit session | `st.session_state` | 重啟清除 |
+
+---
+
+## 八、Git 狀態（截至 2026-06-08）
+
+- **目前分支**：main
+- **領先 origin/main**：15 個 commit（尚未 push 至 GitHub）
+- **Modified（未暫存）**：app.py, utils.py, HANDOFF.md
+- **Untracked（新增，待 commit）**：state.py, components/, services/
+- **Untracked（不應 commit）**：`.claude/settings.json`
+
+最近 commit：
+1. `4e0211c` feat: Tab 5 追蹤清單加入四子 Tab（技術面/估值/新聞筆記）
+2. `ecd3cd9` fix: 三項 UI/邏輯問題修正
+3. `3209772` feat: 個股健檢儀表板 + Top 10 基本面品質加成
+
+### 本次對話（2026-06-08）未提交變更摘要
+
+| 類型 | 檔案 | 說明 |
+|------|------|------|
+| 修改 | `app.py` | 登入繞過修復 + 5個 render 函式移除 + import 新增 + 備份還原升級 |
+| 修改 | `utils.py` | `write_json` 改為 atomic 寫入（.tmp + os.replace）|
+| 修改 | `HANDOFF.md` | 移除密碼/Gmail + 更新架構 |
+| 新建 | `state.py` | 全域 session_state 初始化 |
+| 新建 | `components/__init__.py` | package 入口 |
+| 新建 | `components/fundamental_blocks.py` | 基本面 + 健檢 render |
+| 新建 | `components/technical_blocks.py` | 技術分析 render |
+| 新建 | `components/flow_blocks.py` | 籌碼 render |
+| 新建 | `components/news_blocks.py` | 新聞情緒 render |
+| 新建 | `services/__init__.py` | package 入口 |
+| 新建 | `services/persistence_service.py` | 備份還原 schema 驗證 + atomic 寫入 |
+| 移動 | `scripts/archive/merge_tabs.py` | 危險腳本封存 |
+| 移動 | `scripts/archive/refactor_tab3.py` | 危險腳本封存 |
+
+### 本次對話（2026-06-11）資料準確性修正
+
+**A. 三大法人/成交量數字錯誤（3 個 bug，已驗證修復）**
+
+| # | 檔案 | 問題 | 修正 |
+|---|------|------|------|
+| 1 | `twse_institutional.py` | T86/MI_MARGN 的 date 參數送「民國 7 碼」(`_roc`)，API 實際要「西元 8 碼」→ 法人資料整條 TWSE 路徑長期失敗，只能靠需 token 的 FinMind 備援 | date 改 `dt.strftime("%Y%m%d")` |
+| 2 | `twse_institutional.py` | T86 回傳單位為「股」，但全平台顯示/門檻皆以「張(千股)」為準 → 買賣超數字放大 1000 倍 | loader 源頭 `round(值/1000)`（TWSE + FinMind 兩路徑）|
+| 3 | `data_loader.py` | 成交量同為「股」卻標示「張」→ 放大 1000 倍 | `parse_twse_daily` / `fetch_tpex_daily` 改 `int(volume // 1000)` |
+
+- 欄位比對：T86 實際欄位名為「外陸資買賣超股數(不含外資自營商)」等，舊程式找「(千股)」找不到、靠 hard-code index 僥倖正確；已把真實欄位名加入 `idx()` 候選清單。
+- 驗證：2330（2026-06-10）外資 -15,543 張、投信 -4、自營 -731、合計 -16,278 張，= 原始 API 股數 ÷1000，正確。
+- 影響範圍：`flow_blocks`(張)、`app.py`(千股)、`signal_engine`(門檻 500/200 千股)、`news_analyzer`(inst_flow_k 千張) 全部一次校正；因 quant_model 只用跨截面排名，評分結果不變。
+- ⚠️ 待查：`MI_MARGN` 融資融券為巢狀結構（頂層 `fields=None`），單位（張）未變動，但解析穩定性需另行驗證。
+
+**B. 供應鏈/概念股分類校正（`config.py`）**
+
+- 移除全部 `待確認` 代號；錯置者歸位：8213 志超→PCB、6269 台郡→PCB、3406 玉晶光→光學鏡頭、3533 嘉澤/3665 貿聯→連接器、3532 台勝科→半導體材料、1533 車王電→電動車。
+- 重建純淨的「半導體材料/光學鏡頭/醫療器材/儲能太陽能」群組（移除 6285 啟碁、6244 茂迪、4174 浩鼎等錯置）。
+- 原則：只保留高把握代號，寧缺勿錯（符合 CLAUDE.md 反捏造規範）。
+
+**C. 族群清單顯示個股法人張數 + 擴充偏少群組（app.py + config.py）**
+
+- **起因**：使用者用 Yahoo 對照「被動元件」族群覺得對不上。實測官方 T86（6/10）證實**平台數字正確**（國巨 -6,206 張 = Yahoo），問題在呈現。
+- **app.py（產業瀏覽器族群清單）**：
+  - 「籌碼」欄從只有燈號 → 改「燈號 + 帶色外資張數」（如 `🔴 -6,206`），可直接與 Yahoo/玩股網核對。`.sc-sig` 欄寬 60→108px。
+  - 「外資合計」改名「外資合計(全族群)」+ 加 help/caption 標明是**全族群加總、非單一個股**（避免再被誤讀）。
+  - 成交量 `int(vol/10000)萬` → `f"{vol/10000:.1f}萬"`，修正小量股顯示「0萬」。
+- **config.py 群組擴充（新增代號全經官方 STOCK_DAY_ALL 清單逐一覆核名稱）**：
+  - 修兩個既有錯誤：**8249** 官方為「菱光」非雲豹能源（移除）；**6770** 為「力積電(晶圓代工)」非立積——立積實為 **4968**（已歸位）。
+  - 移除下市 **2456 奇力新**（併入國巨）。
+  - 擴充：被動元件(2→6)、晶圓代工(+6770)、IC設計(+4968/5269)、電源管理(+8081/3588)、電動車(+1536/1521/6605)、儲能太陽能(+6443)、散裝航運(+2637)、醫療器材(+1786)、機器人(+4540/1597)。
+  - 排除查證為下市/上櫃無法當場驗證者：3514昱晶(下市)、6244茂迪/4735豪展/6138茂達(上櫃未驗)。
+
+**D. 上櫃（TPEx）資料來源修復（data_loader.py + config.py）**
+
+- **問題**：櫃買中心網站改版後，舊端點 `tpex_mainboard_companies`（公司清單）與 `mops_api_qry`（tpex_daily）皆回傳 HTML → **上櫃股票長期完全載入失敗**（許多上櫃股顯示「未在市場資料中」）。
+- **修復**：改用單一穩定端點 `tpex_mainboard_daily_close_quotes`（JSON，含代號＋名稱＋收盤＋成交股數，免 token、無日期參數）。`data_loader.py` 新增 `_fetch_tpex_raw()` 共用快取，`fetch_tpex_companies` / `fetch_tpex_daily` 由其派生。成交股數同樣 ÷1000 轉「張」。
+- **驗證**：成功載入 886 檔上櫃公司＋行情；世界先進(5347)/茂達(6138)/精華(1565)/中美晶(5483)/環球晶(6488)/家登(3680) 均正常。
+- 注意：daily_close_quotes 無產業別欄位，上櫃股產業別暫帶「其他」（供應鏈分組由 config 代號清單決定，不受影響）。
+
+---
+
+## 九、待優化方向
+
+### Phase 1 已完成（2026-06-08）
+
+- [x] P0 安全修復：登入繞過、write_json atomic、HANDOFF 敏感資料清除
+- [x] P1 架構分解：state.py、components/、services/persistence_service.py
+- [x] 危險腳本封存至 scripts/archive/
+
+### Phase 2 已完成（2026-06-08）
+
+- [x] 10 個 Tab → 5 個主 Tab（closure 方案）
+- [x] 合併 熱度排行 + 產業瀏覽器 → 🔥 主題供應鏈
+- [x] 合併 整體分析 + 潛力股 → 🎯 候選篩選
+- [x] 合併 持倉管理 + 追蹤清單 + ETF排行 + 模型設定 → ⭐ 追蹤與組合
+
+### Phase 3 已完成（2026-06-08）
+
+- [x] **THEME_GRAPH**：`config.py` 新增 7 個主題（AI基礎建設/先進封裝/光通訊/低軌衛星/地緣政治/電動車機器人/漲價受惠），橋接 PRICE_THEMES + SUPPLY_CHAIN_GROUPS + data/ JSON
+- [x] **data/ 目錄**：從 TaiwanTechNewsMonitor/config/ 複製 6 個 JSON（supply_chains/events/rules/future_events/sources/concepts）
+- [x] **radar_loader.py**：RadarLoader 整合事件日程 + 主題熱度 + 傳導規則，11 個未來事件、7 個主題可載入
+- [x] **components/radar_blocks.py**：主題卡片 + 事件日程 + 宏觀指標 render 元件
+- [x] **情勢雷達強化**：Tab 1（`_render_tab_radar`）新增主題訊號 + 未來 60 天事件日程 + 宏觀快照，原美股連動保留在底部
+
+### Phase 3 待執行（資料模型）
+
+- [ ] 建立 `THEME_GRAPH`（整合 NEWS_TO_SUPPLY_CHAIN + PRICE_THEMES + SUPPLY_CHAIN_GROUPS）
+
+### 其他已知待優化
+
+1. **UI 整體 RWD**：目前無 mobile 支援，寬度固定
+2. **Tab 4 追蹤清單技術面**：首次需手動點載入按鈕，可考慮自動預載
+3. **毛利率/淨利率**：仍取最新單季（非 TTM 平均），可進一步優化
+4. **Bootstrap CI**：`backtest.py` 已實作 `bootstrap_model_confidence()`，但 Tab 7 模型設定尚未整合顯示
+5. **app.py 舊 comment**：Tab 2 候選清單 / Tab 3 個股分析 的 comment 為過時遺留（可清理）
+
+---
+
+## 十、開發規範提醒
+
+1. **絕對禁止在函式內部 `from x import y`** — 已發生三次，每次在 `main()` 造成 UnboundLocalError
+2. **修改大型函式前先 Read 上下文**（app.py 超過 3,500 行）
+3. **每次修改後驗證**：`.\.venv\Scripts\python.exe -m py_compile app.py`
+4. **`git add` 時不要 commit `.claude/settings.json`**（個人設定不入庫）
+
+---
+
+## 十一、啟動測試指令
+
 ```powershell
-# 在專案目錄執行（約 3~5 分鐘）
-.\run.ps1  # 先確認能正常啟動，再關閉
-python scripts/init_price_history.py
+cd "C:\投資\tw-stock-platform_20260511"
+.\.venv\Scripts\python.exe -m py_compile app.py  # 語法檢查
+.\run.ps1                                         # 啟動平台
 ```
-完成後確認 `tw_quant_data/price_history.json` 存在且有資料。
-
-### 步驟 3 — 確認模型分數差異
-1. 執行 `.\run.ps1` 或雙擊 `start.bat` 啟動平台
-2. 點「🌐 載入全市場」
-3. 查看「量化候選清單」頁面 — 各股分數應有明顯差異（不再全是 50）
-
-### 步驟 4 — 測試 start.bat
-在 Windows 檔案總管中雙擊 `start.bat`，確認平台能自動啟動。
-
-### 步驟 5 — 測試 Actions 自動報告（手動觸發）
-1. 前往 GitHub → Actions → 「每日盤後分析報告」
-2. 點「Run workflow」手動觸發
-3. 觀察 logs：應能看到「Run quantitative model」步驟成功
-4. 確認 Gmail 收到報告且 TOP5 有實際股票名稱（不再顯示「無快照資料」）
-
----
-
-## 六、給新對話 Claude 的指令範本
-
-```
-請閱讀 HANDOFF.md 了解專案現況。
-目前最需要解決的問題是：[描述問題]
-```
-
----
-
-## 七、GitHub Secrets（Actions 用）
-
-| Secret 名稱 | 用途 |
-|-------------|------|
-| `GMAIL_USER` | scps960810@gmail.com |
-| `GMAIL_APP_PASSWORD` | Gmail App 密碼（已設定，勿外洩）|
-| `FINMIND_TOKEN` | FinMind API token（選用，未設定則用 yfinance 備援）|
-
-## 八、虛擬環境說明
-
-**為什麼一定要在虛擬環境（.venv）裡執行？**
-
-Python 套件安裝在「全域」或「虛擬環境」是兩件事：
-
-| | 全域 Python | 虛擬環境 .venv |
-|--|--|--|
-| 套件安裝位置 | 整台電腦共用 | 只在這個專案 |
-| 版本衝突風險 | 高（A 專案要 pandas 2.0，B 專案要 pandas 1.5 → 衝突）| 無（各自隔離）|
-| 刪除影響 | 影響所有專案 | 只影響此專案 |
-
-本專案的 `streamlit`、`pandas 3.x`、`yfinance` 等套件都裝在 `.venv` 裡，
-全域 Python 裡沒有，所以直接執行 `python` 或 `streamlit` 會找不到套件。
-
-**解法（三擇一）：**
-1. 雙擊 `start.bat`（最簡單，自動 activate）
-2. 執行 `.\run.ps1`（PowerShell 版）
-3. 手動啟動：`.\.venv\Scripts\Activate.ps1` 再 `streamlit run app.py`
-
-## 九、注意事項
-
-- `secrets.toml` 已在 `.gitignore`，不會上傳 GitHub
-- 每次修改 code 後需 `git add . && git commit && git push`，Streamlit Cloud 才會自動更新
-- `tw_quant_data/` 也在 `.gitignore`，price_history.json 只存在本機，需用 `init_price_history.py` 重建

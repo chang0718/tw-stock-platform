@@ -904,9 +904,11 @@ class QuantModel:
 
         pb = f.get("pb")
         if pb is not None:
-            if pb < 1.5:  v_score += 25; details["PB"] = f"+25（{pb:.2f}倍，低淨值比）"
+            if pb < 1.5:   v_score += 25; details["PB"] = f"+25（{pb:.2f}倍，低淨值比）"
             elif pb < 2.5: v_score += 15; details["PB"] = f"+15（{pb:.2f}倍，合理）"
-            elif pb < 4:  v_score += 5;  details["PB"] = f"+5（{pb:.2f}倍，偏高）"
+            elif pb < 4:   v_score += 8;  details["PB"] = f"+8（{pb:.2f}倍，偏高）"
+            elif pb < 8:   v_score += 3;  details["PB"] = f"+3（{pb:.2f}倍，高成長溢價）"
+            else:          details["PB"] = f"0（{pb:.2f}倍，極高溢價，需強勁獲利支撐）"
 
         if ev.get("has_data"):
             fl = ev.get("fair_low"); fm = ev.get("fair_mid"); fh = ev.get("fair_high")

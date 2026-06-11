@@ -5,6 +5,7 @@
 
 import json
 import math
+import os
 from pathlib import Path
 from functools import lru_cache
 from typing import Any, Dict
@@ -73,21 +74,23 @@ def read_json(path: Path, default: Any = None) -> Any:
 
 def write_json(path: Path, data: Any) -> bool:
     """
-    安全寫入JSON檔案
-    
-    Args:
-        path: 檔案路徑
-        data: 要寫入的資料
-    
-    Returns:
-        寫入是否成功
+    Atomic JSON 寫入：先寫 .tmp 再 os.replace()，避免寫到一半時平台重載造成資料損壞。
+    tmp 檔與目標在同目錄，確保 os.replace() 是同磁碟 rename（原子操作）。
     """
+    path = Path(path)
+    tmp = path.parent / (path.stem + ".tmp")
     try:
-        with open(path, 'w', encoding='utf-8') as f:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
         return True
     except Exception as e:
         print(f"❌ 寫入 {path.name} 失敗: {e}")
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
         return False
 
 

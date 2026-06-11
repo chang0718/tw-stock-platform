@@ -21,3 +21,6 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Claude Code 本機設定（不上傳）
+.claude/

@@ -14,6 +14,7 @@ v3.0 真實數據版
 """
 
 import hashlib
+import os
 import time
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
@@ -38,6 +39,13 @@ from config import (
     WEIGHTS_FILE,
 )
 from utils import format_percentage, read_json, write_json
+from state import initialize_session_state
+from components.fundamental_blocks import render_fundamental_block, render_health_check_block
+from components.news_blocks import render_news_block
+from components.flow_blocks import render_flow_block
+from components.technical_blocks import render_tech_block
+from components.radar_blocks import render_theme_cards, render_event_calendar, render_macro_bar
+from services.persistence_service import validate_backup, preview_backup, restore_backup
 from data_loader import MarketDataLoader
 from quant_model import QuantModel
 from finmind_loader import FinMindLoader
@@ -66,10 +74,17 @@ st.set_page_config(
 # ============================================================
 
 def _check_password() -> bool:
+    # 僅當明確設定 LOCAL_DEV=1 時跳過驗證（本機開發用）
+    if os.environ.get("LOCAL_DEV") == "1":
+        return True
+
     try:
         correct = st.secrets["auth"]["password"]
     except Exception:
-        return True  # 本機沒設 secrets 時跳過驗證
+        # secrets 缺失時拒絕存取，避免雲端誤配置造成公開存取
+        st.error("⚠️ 尚未設定 .streamlit/secrets.toml 的 [auth] password，請聯絡管理員。")
+        st.info("本機開發請設定環境變數 LOCAL_DEV=1 跳過驗證。")
+        return False
 
     if st.session_state.get("_authenticated"):
         return True
@@ -88,51 +103,7 @@ def _check_password() -> bool:
 if not _check_password():
     st.stop()
 
-# ============================================================
-# Session State 初始化
-# ============================================================
-
-def initialize_session_state():
-    defaults = {
-        "universe_df":       pd.DataFrame(),
-        "weights":           read_json(WEIGHTS_FILE, DEFAULT_WEIGHTS),
-        "notes":             read_json(NOTES_FILE, {}),
-        "last_update":       None,
-        "data_date":         "",
-        # 追蹤清單：{ticker: {name, added_date}}
-        "watchlist":         read_json(WATCHLIST_FILE, {}),
-        "watchlist_data":    {},   # {ticker: {fundamental, news, name}}
-        # 法人 / 融資券（市場載入時抓）
-        "institutional_data": {"inst": {}, "margin": {}},
-        # 個別股票已載入的基本面
-        "stock_fundamentals": {},
-        # 模型輸出快取
-        "model_df_cached":   pd.DataFrame(),
-        "model_cache_key":   "",
-        # FinMind token
-        "finmind_token":     "",
-        # 技術分析快取 {ticker: analysis_dict}
-        "tech_data":         {},
-        # 美股市場快取
-        "us_market_data":    {},
-        "us_market_ts":      0,
-        # 持倉管理
-        "portfolio":         Portfolio(),
-        # 每日快照（回測/調優用）
-        "snapshots":         read_json(SNAPSHOT_FILE, []),
-    }
-    for k, v in defaults.items():
-        if k not in st.session_state:
-            st.session_state[k] = v
-
-    # 若 secrets.toml 已填入真實 FinMind token，自動載入（避免每次重啟都要手動輸入）
-    if not st.session_state.get("finmind_token"):
-        try:
-            secret_token = st.secrets.get("finmind", {}).get("token", "")
-            if secret_token and secret_token != "your_finmind_token_here":
-                st.session_state.finmind_token = secret_token
-        except Exception:
-            pass
+# Session State 初始化已移至 state.py → initialize_session_state()
 
 
 # ============================================================
@@ -454,501 +425,9 @@ def render_sidebar(universe_df: pd.DataFrame) -> Dict:
 # UI 輔助：基本面顯示區塊
 # ============================================================
 
-def render_fundamental_block(fund: Dict):
-    """通用基本面顯示（含數據來源標籤 + 白話解讀）"""
-    if not fund or fund.get("data_type") == "NO_DATA":
-        src = fund.get("fund_data_source") or fund.get("data_source", "")
-        st.warning(
-            f"⚠️ 暫無基本面數據（{src}）\n\n"
-            "建議：① 在 **⚙️ 模型設定** 填入 FinMind 免費 token，或 ② 加入追蹤清單，"
-            "系統會自動嘗試從 yfinance 取得 PE/EPS 等基本指標。"
-        )
-        return
-
-    src_label = fund.get("data_source", "✅ FinMind")
-
-    c1, c2, c3, c4 = st.columns(4)
-    def _m(col, label, val, fmt, help_txt=""):
-        with col:
-            if val is not None:
-                col.metric(label, fmt(val), help=help_txt)
-            else:
-                col.metric(label, "N/A", help=help_txt)
-
-    _rev_month = fund.get("latest_revenue_month", "")
-    _rev_label = f"營收年增率（{_rev_month}）" if _rev_month else "營收年增率"
-    _m(c1, _rev_label, fund.get("revenue_yoy"),
-       lambda v: f"{v:+.1f}%", f"最新月份（{_rev_month}）月營收 vs 去年同月比較。正數=成長，負數=衰退。")
-    _m(c2, "EPS（近四季 TTM）", fund.get("eps"),
-       lambda v: f"${v:.2f}", "近四季每股盈餘合計（TTM）。越高越好，負數代表虧損。用於計算 PE/公平價。")
-    _m(c3, "本益比 PE",    fund.get("pe"),
-       lambda v: f"{v:.1f}倍", "股價是每年獲利的幾倍。<15倍偏便宜；>30倍偏貴")
-    _m(c4, "毛利率",       fund.get("gross_margin"),
-       lambda v: f"{v:.1f}%", "扣掉直接成本後還剩多少比例。>30%不錯；>50%護城河強")
-
-    c5, c6, c7, c8 = st.columns(4)
-    _m(c5, "EPS年增率（TTM YoY）", fund.get("eps_growth_yoy"),
-       lambda v: f"{v:+.1f}%", "近四季合計 EPS vs 前四季合計 EPS 的增長率。正值=獲利成長，負值=衰退。")
-    _m(c6, "淨利率",      fund.get("net_margin"),
-       lambda v: f"{v:.1f}%",  "最終賺到的比例（扣掉所有費用後）。>10%算不錯")
-    _m(c7, "股價淨值比",  fund.get("pb"),
-       lambda v: f"{v:.2f}倍", "股價是帳面價值的幾倍。<1倍可能被低估；>3倍偏貴")
-    _m(c8, "現金殖利率",  fund.get("dividend_yield"),
-       lambda v: f"{v:.2f}%",  "每年配股息的比例。>5%適合存股；<2%配息少")
-
-    if fund.get("latest_revenue_month"):
-        st.caption(f"最新營收月份: {fund['latest_revenue_month']} ｜ 資料來源: {src_label}")
-
-    # ── 白話解讀 ──────────────────────────────────────────────────
-    pe  = fund.get("pe")
-    gm  = fund.get("gross_margin")
-    nm  = fund.get("net_margin")
-    ry  = fund.get("revenue_yoy")
-    eps = fund.get("eps")
-    dy  = fund.get("dividend_yield")
-    eg  = fund.get("eps_growth_yoy")
-
-    interps = []
-    if pe is not None:
-        if pe < 10:
-            interps.append(f"🏷️ **本益比 {pe:.1f}倍**：相當便宜，但要確認獲利是否穩定（本益比過低有時是因為公司有問題）")
-        elif pe < 18:
-            interps.append(f"✅ **本益比 {pe:.1f}倍**：估值合理，不算貴")
-        elif pe < 30:
-            interps.append(f"🟡 **本益比 {pe:.1f}倍**：偏高，需確認成長能支撐這個價格")
-        else:
-            interps.append(f"⚠️ **本益比 {pe:.1f}倍**：偏貴，追高風險高，除非成長非常強勁")
-    if gm is not None:
-        if gm >= 50:
-            interps.append(f"💎 **毛利率 {gm:.1f}%**：護城河強，公司有很強的定價能力")
-        elif gm >= 30:
-            interps.append(f"✅ **毛利率 {gm:.1f}%**：獲利能力不錯")
-        else:
-            interps.append(f"🟡 **毛利率 {gm:.1f}%**：偏低，屬低毛利行業，需靠量取勝")
-    if ry is not None:
-        if ry >= 20:
-            interps.append(f"🚀 **營收年增 {ry:+.1f}%**：成長強勁，業績明顯擴張")
-        elif ry >= 5:
-            interps.append(f"✅ **營收年增 {ry:+.1f}%**：穩健成長")
-        elif ry >= -5:
-            interps.append(f"➡️ **營收年增 {ry:+.1f}%**：持平，需觀察後續是否好轉")
-        else:
-            interps.append(f"⚠️ **營收年增 {ry:+.1f}%**：衰退中，需留意是否為結構性問題")
-    if nm is not None:
-        if nm < 0:
-            interps.append(f"🔴 **淨利率 {nm:.1f}%**：目前虧損，費用大於收入")
-        elif nm < 5:
-            interps.append(f"🟡 **淨利率 {nm:.1f}%**：獲利薄，稍有風吹草動就可能虧損")
-        elif nm >= 20:
-            interps.append(f"💰 **淨利率 {nm:.1f}%**：賺錢效率極高")
-    if dy is not None and dy > 0:
-        if dy >= 5:
-            interps.append(f"💵 **殖利率 {dy:.2f}%**：配息豐厚，適合存股族")
-        elif dy >= 2:
-            interps.append(f"✅ **殖利率 {dy:.2f}%**：有穩定配息")
-
-    if interps:
-        st.markdown("##### 📝 白話解讀")
-        for t in interps:
-            st.markdown(f"- {t}")
-        st.caption("⚠️ 以上為財務數字的初步解讀，不構成買賣建議。請搭配產業趨勢與整體市場環境判斷。")
-
-
-def render_news_block(news_data: Dict):
-    """新聞情緒區塊（直接列新聞，不顯示無意義情緒分數）"""
-    if not news_data:
-        return
-
-    s         = news_data.get("sentiment", {})
-    news_list = news_data.get("news", [])
-
-    # 整體情緒（只在有足夠新聞時才顯示，且移除沒意義的純數字分數）
-    if news_list:
-        label       = s.get("label", "中性")
-        label_color = s.get("label_color", "🟡")
-        pos_kw = s.get("pos_keywords", [])
-        neg_kw = s.get("neg_keywords", [])
-
-        sent_col, kw_col = st.columns([1, 3])
-        with sent_col:
-            st.metric("整體情緒傾向", f"{label_color} {label}",
-                      help="根據新聞標題關鍵字判斷，正面/負面/中性。\n新聞數量少時準確度有限，僅供參考。")
-        with kw_col:
-            if pos_kw:
-                st.caption(f"正面關鍵字：{', '.join(pos_kw)}")
-            if neg_kw:
-                st.caption(f"負面關鍵字：{', '.join(neg_kw)}")
-            st.caption(f"資料來源：{s.get('data_source', '關鍵字分析')}　共 {len(news_list)} 則新聞")
-
-        st.markdown("---")
-
-    # 新聞列表（直接展示，不折疊）
-    if news_list:
-        st.markdown(f"**📰 近期相關新聞（{len(news_list)} 則）**")
-        for n in news_list:
-            src_icon = "📡" if n.get("source") == "yfinance" else "📰"
-            st.markdown(f"{src_icon} **[{n['title']}]({n['link']})** — `{n['published'][:10]}`")
-            if n.get("summary"):
-                st.caption(n["summary"])
-        st.caption("⚠️ 新聞來源：yfinance / Google RSS。點擊標題可前往原文閱讀。")
-    else:
-        st.info("⚠️ 目前沒有抓到新聞。可能原因：① 股票代號較冷門 ② 網路連線問題 ③ 需安裝 feedparser（`pip install feedparser`）")
-
-
-def render_flow_block(stock: dict, show_reload: bool = False):
-    """籌碼資料區塊"""
-    src = stock.get("flow_data_source", "⚠️ 暫無數據")
-    has_data = stock.get("foreign_net") is not None or stock.get("margin_balance") is not None
-    if not has_data:
-        inst_loaded = bool(st.session_state.get("institutional_data", {}).get("inst"))
-        if inst_loaded:
-            st.info("ℹ️ 本股今日無三大法人買賣記錄（TWSE T86 API 只回傳當日有交易的標的）")
-        else:
-            st.warning("⚠️ 籌碼數據未載入。請點擊側邊欄「🔄 載入上市」或「🌐 載入全市場」以取得三大法人資料。")
-        if show_reload:
-            if st.button("🔄 重新載入三大法人資料", key="reload_inst"):
-                with st.spinner("載入中..."):
-                    il = TWSeInstitutionalLoader()
-                    st.session_state.institutional_data = {
-                        "inst":   il.get_institutional_all(
-                            finmind_token=st.session_state.get("finmind_token", "")
-                        ) or {},
-                        "margin": il.get_margin_all() or {},
-                    }
-                    st.session_state.model_cache_key = ""
-                st.rerun()
-        return
-    _inst_date = stock.get("inst_date") or stock.get("date", "")
-    _date_hint = f"　日期：{_inst_date}" if _inst_date else ""
-    st.caption(f"資料來源：{src}{_date_hint}　｜　單位：張（= 千股 = 1,000 股）")
-    c1, c2, c3 = st.columns(3)
-    def _flow(col, label, val):
-        with col:
-            if val is not None:
-                col.metric(label, f"{val:+,} 張",
-                           help="正值=買超（法人在買進），負值=賣超（法人在賣出）。單位：張（1張=1,000股）。")
-            else:
-                col.metric(label, "N/A")
-    _flow(c1, "外資今日買賣超", stock.get("foreign_net"))
-    _flow(c2, "投信今日買賣超", stock.get("trust_net"))
-    _flow(c3, "自營今日買賣超", stock.get("dealer_net"))
-
-    c4, c5 = st.columns(2)
-    with c4:
-        mb = stock.get("margin_balance")
-        mc = stock.get("margin_change")
-        if mb is not None:
-            c4.metric("融資餘額", f"{mb:,}", delta=f"{mc:+,}" if mc else None)
-        else:
-            c4.metric("融資餘額", "N/A")
-    with c5:
-        sb = stock.get("short_balance")
-        sc = stock.get("short_change")
-        if sb is not None:
-            c5.metric("融券餘額", f"{sb:,}", delta=f"{sc:+,}" if sc else None)
-        else:
-            c5.metric("融券餘額", "N/A")
-
-
-def render_health_check_block(fund: dict, fin_trend: list = None,
-                               val_pct: dict = None, epsfv: dict = None,
-                               compact: bool = False):
-    """
-    個股四維健檢儀表板（參考 winvest.tw 風格）。
-    compact=True 時只顯示分數條，不顯示詳細說明。
-    """
-    scores = QuantModel.health_check_score(fund, fin_trend, val_pct, epsfv)
-    if not fund or fund.get("data_type") == "NO_DATA":
-        st.caption("⚠️ 健檢需要基本面資料（請載入個股或填入 FinMind token）")
-        return
-
-    total = scores["total"]
-    verdict = scores["verdict"]
-    color   = scores["verdict_color"]
-
-    # ── 總評橫幅 ──────────────────────────────────────────────────
-    st.markdown(
-        f'<div style="background:{color}22;border-left:4px solid {color};'
-        f'padding:10px 16px;border-radius:6px;margin-bottom:12px;">'
-        f'<span style="font-size:20px;font-weight:700;color:{color}">{total:.0f} 分</span>'
-        f'&ensp;<span style="color:#e6edf3;font-size:15px">{verdict}</span>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-
-    # ── 四維進度條 ────────────────────────────────────────────────
-    dims = [
-        ("💰 獲利力", scores["profitability"],
-         "EPS / 毛利率 / 淨利率 / ROE 綜合評分"),
-        ("📈 成長力", scores["growth"],
-         "營收 YoY / EPS YoY / 最新季加速度"),
-        ("🎁 股利力", scores["dividend"],
-         "現金殖利率 / 配息可持續性"),
-        ("⚖️ 估 值", scores["valuation"],
-         "PE 歷史分位 / PB / 公平價估算"),
-    ]
-    _hc_cols = st.columns(4)
-    for col, (label, sc, tip) in zip(_hc_cols, dims):
-        with col:
-            _bar_color = "#26a69a" if sc >= 70 else ("#ff9800" if sc >= 45 else "#ef5350")
-            st.markdown(f"**{label}**")
-            st.markdown(
-                f'<div style="background:#30363d;border-radius:4px;height:8px;margin:4px 0 2px">'
-                f'<div style="background:{_bar_color};width:{sc}%;height:8px;border-radius:4px"></div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown(f'<span style="font-size:18px;font-weight:700;color:{_bar_color}">{sc:.0f}</span>'
-                        f'<span style="font-size:12px;color:#8b949e"> / 100</span>',
-                        unsafe_allow_html=True)
-            if not compact:
-                st.caption(tip)
-
-    if compact:
-        return
-
-    # ── 雷達圖 ────────────────────────────────────────────────────
-    _categories = ["獲利力", "成長力", "股利力", "估值", "獲利力"]
-    _values = [scores["profitability"], scores["growth"],
-               scores["dividend"],      scores["valuation"],
-               scores["profitability"]]
-    _fig_radar = go.Figure(go.Scatterpolar(
-        r=_values, theta=_categories, fill="toself",
-        line_color="#1f6feb", fillcolor="rgba(31,111,235,0.25)",
-        name="健檢分數",
-    ))
-    _fig_radar.add_trace(go.Scatterpolar(
-        r=[70, 70, 70, 70, 70], theta=_categories,
-        mode="lines", line=dict(color="#ff9800", dash="dot", width=1),
-        name="良好基準線（70）",
-    ))
-    _fig_radar.update_layout(
-        polar=dict(
-            bgcolor="#161b22",
-            radialaxis=dict(visible=True, range=[0, 100], tickfont=dict(color="#8b949e")),
-            angularaxis=dict(tickfont=dict(color="#e6edf3")),
-        ),
-        paper_bgcolor="#0d1117",
-        showlegend=True,
-        height=320, margin=dict(t=20, b=20),
-        legend=dict(font=dict(color="#8b949e"), bgcolor="#0d1117"),
-    )
-    st.plotly_chart(_fig_radar, use_container_width=True)
-
-    # ── 加分明細（可展開）+ 白話術語解說 ───────────────────────────
-    _TERM_EXPLAIN = {
-        "EPS盈利":    "每股盈餘（EPS）：公司每1股在過去12個月賺了多少錢。正值=獲利，負值=虧損，是最基本的獲利能力指標。",
-        "毛利率":     "毛利率：賣出商品扣除直接成本（原料、製造費）後剩的比例。越高代表定價能力越強。>30%算優秀，>50%代表強護城河。",
-        "淨利率":     "淨利率：扣掉所有費用（管銷、研發、稅等）後，最終賺到的比例。>10%不錯，>15%卓越，<5%要留意費用控制。",
-        "ROE":        "股東權益報酬率（ROE）：公司用股東投入的錢賺了多少，衡量管理效率。>15%代表高效，<8%代表資本運用偏差。",
-        "營收YoY":   "月營收年增率：和去年同月相比，銷售額成長或衰退多少（%）。持續正成長是好訊號，衰退需確認是否為產業性還是公司特定問題。",
-        "EPS YoY":   "EPS 年增率（TTM YoY）：近四季獲利合計 vs 前四季合計的成長率。>20%為加速成長，負值代表獲利在下滑。",
-        "季度加速":   "最新一季和去年同季比較的 EPS 成長率。連續加速（每季比去年同期更好）代表獲利動能持續增強，是強勢的訊號。",
-        "殖利率":     "現金殖利率：每年配發的股息 ÷ 目前股價。代表持股每年能領到多少利息比例。>4%算高息股，<2%以配息角度吸引力偏低。",
-        "盈利能力":   "EPS 為正，代表公司目前有獲利，具備未來配發現金股利的能力基礎。",
-        "估值加成":   "本益比偏低（PE < 20倍），代表以目前股價買到每單位獲利更便宜，也讓殖利率有較高空間。",
-        "配息可持續": "以殖利率 × PE 估算的配息比率（payout ratio proxy）。若估算比率 < 100% 代表配息有可能可持續。",
-        "PE分位":     "本益比歷史分位數：目前 PE 在過去3年中的位置。25%以下=歷史便宜區（低估），75%以上=歷史貴區（高估），50%=中性。",
-        "PB":         "股價淨值比（PB）：股價是帳面資產的幾倍。<1.5倍通常算便宜，>3倍偏貴。金融業和資產重的公司更常用 PB 評估。",
-        "公平價估值": "以歷史 PE 中位數×近四季 EPS 計算的合理價，和目前 PE 在歷史分位比較，判斷目前股價是偏高還是偏低。",
-    }
-    if scores.get("details"):
-        with st.expander("📋 健檢評分明細（含術語解說）", expanded=False):
-            _det = scores["details"]
-            _d1, _d2 = st.columns(2)
-            _profit_keys = [k for k in _det if k in ("EPS盈利", "毛利率", "淨利率", "ROE")]
-            _growth_keys = [k for k in _det if k in ("營收YoY", "EPS YoY", "季度加速")]
-            _div_keys    = [k for k in _det if k in ("殖利率", "盈利能力", "估值加成", "配息可持續")]
-            _val_keys    = [k for k in _det if k in ("PE分位", "PB", "公平價估值")]
-
-            def _show_items(keys):
-                for k in keys:
-                    st.markdown(f"**• {k}**：{_det[k]}")
-                    if k in _TERM_EXPLAIN:
-                        st.caption(f"  💬 {_TERM_EXPLAIN[k]}")
-
-            with _d1:
-                st.markdown("**💰 獲利力**")
-                _show_items(_profit_keys)
-                st.markdown("**📈 成長力**")
-                _show_items(_growth_keys)
-            with _d2:
-                st.markdown("**🎁 股利力**")
-                _show_items(_div_keys)
-                st.markdown("**⚖️ 估值**")
-                _show_items(_val_keys)
-    st.caption("⚠️ 健檢評分為量化模型參考，不構成投資建議。請結合產業趨勢與個人風險承受度自行判斷。")
-
-
-def render_tech_block(ta: Dict, stock: Dict = None):
-    """技術分析圖表（subplot 版）+ 文字摘要 + 購買信心指數"""
-    if "error" in ta:
-        st.warning(ta["error"])
-        return
-
-    from plotly.subplots import make_subplots
-
-    ind   = ta["indicators"]
-    ana   = ta["analysis"]
-    dates = ind["dates"]
-
-    # ── 四合一 Subplot ──
-    fig = make_subplots(
-        rows=4, cols=1, shared_xaxes=True,
-        row_heights=[0.50, 0.16, 0.17, 0.17],
-        vertical_spacing=0.03,
-        subplot_titles=("K線 + MA + 布林通道", "成交量", "RSI (14)", "MACD (12,26,9)"),
-    )
-
-    # Row 1: K線
-    fig.add_trace(go.Candlestick(
-        x=dates, open=ind["open"], high=ind["high"],
-        low=ind["low"], close=ind["close"],
-        name="K線", increasing_line_color="#ef5350",
-        decreasing_line_color="#26a69a",
-    ), row=1, col=1)
-    for ma_key, color, lbl, width in [
-        ("ma5","#FFA726","MA5",1.2),("ma20","royalblue","MA20",1.4),
-        ("ma60","#AB47BC","MA60",1.4),("ma120","#FF7043","MA120",1.2),("ma240","#26C6DA","MA240（年線）",1.2),
-    ]:
-        if ma_key not in ind:
-            continue
-        vals = ind[ma_key]
-        if any(v == v and v is not None for v in vals):
-            fig.add_trace(go.Scatter(x=dates, y=vals, name=lbl,
-                                     line=dict(color=color, width=width), opacity=0.85), row=1, col=1)
-    fig.add_trace(go.Scatter(x=dates, y=ind["bb_upper"], name="布林上",
-                              line=dict(color="gray", dash="dot", width=1), opacity=0.5,
-                              showlegend=True), row=1, col=1)
-    fig.add_trace(go.Scatter(x=dates, y=ind["bb_lower"], name="布林下",
-                              line=dict(color="gray", dash="dot", width=1), opacity=0.5,
-                              fill="tonexty", fillcolor="rgba(180,180,180,0.08)"), row=1, col=1)
-
-    # Row 2: 成交量
-    vol_colors = ["#ef5350" if c >= o else "#26a69a"
-                  for c, o in zip(ind["close"], ind["open"])]
-    fig.add_trace(go.Bar(x=dates, y=ind["volume"], name="成交量",
-                          marker_color=vol_colors, opacity=0.8), row=2, col=1)
-    fig.add_trace(go.Scatter(x=dates, y=ind["vol_ma20"], name="量MA20",
-                              line=dict(color="orange", width=1.3)), row=2, col=1)
-
-    # Row 3: RSI
-    fig.add_trace(go.Scatter(x=dates, y=ind["rsi"], name="RSI",
-                              line=dict(color="rgb(99,110,250)", width=1.5)), row=3, col=1)
-    fig.add_hline(y=70, line_dash="dash", line_color="red",   opacity=0.6,
-                  annotation_text="超買70", annotation_position="top right", row=3, col=1)
-    fig.add_hline(y=30, line_dash="dash", line_color="green", opacity=0.6,
-                  annotation_text="超賣30", annotation_position="bottom right", row=3, col=1)
-
-    # Row 4: MACD
-    hist_colors = ["#ef5350" if v >= 0 else "#26a69a" for v in ind["macd_hist"]]
-    fig.add_trace(go.Bar(x=dates, y=ind["macd_hist"], name="MACD柱",
-                          marker_color=hist_colors, opacity=0.7), row=4, col=1)
-    fig.add_trace(go.Scatter(x=dates, y=ind["macd"],        name="MACD",
-                              line=dict(color="royalblue", width=1.5)), row=4, col=1)
-    fig.add_trace(go.Scatter(x=dates, y=ind["macd_signal"], name="Signal",
-                              line=dict(color="orange",    width=1.5)), row=4, col=1)
-
-    fig.update_layout(
-        height=800,
-        xaxis_rangeslider_visible=False,
-        legend=dict(orientation="h", y=1.01, x=0),
-        margin=dict(t=60, b=20),
-    )
-    fig.update_yaxes(row=3, col=1, range=[0, 100])
-    fig.update_xaxes(row=4, col=1, showticklabels=True)
-    st.plotly_chart(fig, use_container_width=True)
-
-    # ── 購買信心指數 ──
-    tech_score_norm = min(100, max(0, 50 + ana["score"] * 8))
-    prob20      = (stock.get("prob20", 50)       if stock else 50)
-    comp_score  = (stock.get("composite_score", 50) if stock else 50)
-    flow_score  = (stock.get("flow_score", 50)   if stock else 50)
-    quality     = (stock.get("quality_score", 50) if stock else 50)
-
-    buy_confidence = round(
-        tech_score_norm * 0.30
-        + prob20        * 0.30
-        + comp_score    * 0.15
-        + flow_score    * 0.15
-        + quality       * 0.10,
-        1,
-    )
-
-    if buy_confidence >= 70:
-        conf_label = "🟢 建議買進"
-        conf_color = "success"
-    elif buy_confidence >= 55:
-        conf_label = "🟡 可分批佈局"
-        conf_color = "info"
-    elif buy_confidence >= 40:
-        conf_label = "🟡 觀望"
-        conf_color = "warning"
-    else:
-        conf_label = "🔴 建議迴避 / 考慮賣出"
-        conf_color = "error"
-
-    st.markdown("---")
-    st.markdown("#### 🎯 購買信心指數")
-    ci1, ci2, ci3, ci4, ci5, ci6 = st.columns(6)
-    ci1.metric("**信心指數**", f"{buy_confidence:.0f} / 100")
-    ci2.metric("建議", conf_label)
-    ci3.metric("技術評分", f"{tech_score_norm:.0f}")
-    ci4.metric("20日機率", f"{prob20:.1f}%")
-    ci5.metric("籌碼分", f"{flow_score:.0f}")
-    ci6.metric("品質分", f"{quality:.0f}")
-    st.caption("門檻：≥70 建議買進 ｜ 55-70 分批佈局 ｜ 40-55 觀望 ｜ <40 建議迴避")
-
-    # ── 技術判斷摘要 ──
-    st.markdown("---")
-    st.markdown(f"### {ana['overall']}")
-    cp = ana["current_price"]
-
-    # 目標價
-    t5l, t5h   = ana["target_5d"]
-    t20l, t20h = ana["target_20d"]
-    tc1, tc2, tc3, tc4 = st.columns(4)
-    tc1.metric("現價",       f"${cp:.2f}")
-    tc2.metric("5日目標",    f"${t5l:.2f}–${t5h:.2f}", f"{(t5h-cp)/cp*100:+.1f}%")
-    tc3.metric("20日目標",   f"${t20l:.2f}–${t20h:.2f}", f"{(t20h-cp)/cp*100:+.1f}%")
-    h52, l52 = ana.get("high_52w", cp), ana.get("low_52w", cp)
-    pct_52 = (cp - l52) / (h52 - l52) * 100 if h52 != l52 else 50
-    tc4.metric("52週位置", f"{pct_52:.0f}%", f"H:{h52:.0f} L:{l52:.0f}")
-
-    # 訊號
-    st.markdown("#### 📡 技術訊號")
-    for sig in ana["signals"]:
-        st.write(sig)
-
-    # 支撐壓力 + 費波那契
-    col_s, col_r, col_f = st.columns(3)
-    with col_s:
-        st.markdown("**短期支撐位**")
-        for s in ana["supports"][:4]:
-            dist = (s - cp) / cp * 100
-            st.write(f"${s:.2f}  `{dist:+.1f}%`")
-    with col_r:
-        st.markdown("**短期壓力位**")
-        for r in ana["resistances"][:4]:
-            dist = (r - cp) / cp * 100
-            st.write(f"${r:.2f}  `{dist:+.1f}%`")
-    with col_f:
-        st.markdown("**費波那契回撤（52週）**")
-        fib = ana.get("fib_levels", {})
-        for label, lvl in fib.items():
-            dist = (lvl - cp) / cp * 100
-            icon = "🔵" if lvl < cp else "🟠"
-            st.write(f"{icon} {label}：${lvl:.2f}  `{dist:+.1f}%`")
-
-    st.caption("⚠️ 以上為技術層面分析，請搭配基本面與籌碼綜合判斷。技術分析不保證準確。")
-
-    # ── 指標教學說明 ──
-    with st.expander("📖 各技術指標原理與判讀說明"):
-        for key, exp in INDICATOR_EXPLANATIONS.items():
-            st.markdown(f"**{exp['name']}**")
-            st.caption(f"原理：{exp['principle']}")
-            st.markdown(exp["how_to_read"])
-            st.markdown("---")
+# render_fundamental_block, render_news_block, render_flow_block,
+# render_health_check_block, render_tech_block
+# → 已移至 components/ 目錄，並於頂部 import
 
 
 # ============================================================
@@ -1118,22 +597,9 @@ def main():
     real_flow_pct = (model_df["has_real_flow"].sum() / max(len(model_df), 1) * 100) if not model_df.empty else 0
     c5.metric("✅ 真實數據率", f"{real_fund_pct:.0f}%/{real_flow_pct:.0f}%", help="基本面/籌碼真實數據比例")
 
-    # ── 分頁 ──────────────────────────────────────────────────────
-    tabs = st.tabs([
-        "🏆 整體分析",
-        "🌍 美股連動",
-        "🔍 個股分析",
-        "💼 持倉管理",
-        "⭐ 追蹤清單",
-        "🔥 熱度排行",
-        "📊 產業瀏覽器",
-        "⚙️ 模型設定",
-        "🎯 潛力股",
-        "📈 ETF 排行",
-    ])
+    # ── Tab 內容函式（closure，引用 main() 區域變數，底部統一建立 st.tabs）────
 
-    # ========== Tab 0: 整體分析 ==========
-    with tabs[0]:
+    def _render_tab_overall():
         st.subheader("🏆 整體分析 - 多面向綜合推薦")
         if model_df.empty:
             st.warning("⚠️ 沒有資料，請先點擊左側「載入市場資料」")
@@ -1374,9 +840,51 @@ def main():
             else:
                 st.info("⚠️ 請先載入市場資料")
 
-    # ========== Tab 1: 美股連動 ==========
-    with tabs[1]:
-        st.subheader("🌍 美股連動分析")
+    def _render_tab_radar():
+        st.subheader("🌍 情勢雷達")
+        st.caption("整合國際事件、主題熱度與宏觀指標，協助判斷當前哪些主題值得研究。")
+
+        # ── 📡 主題訊號 ──────────────────────────────────────────────
+        st.markdown("### 📡 主題訊號")
+        try:
+            from radar_loader import RadarLoader as _RL
+            _radar = _RL()
+            _themes = _radar.get_active_themes()
+            render_theme_cards(_themes)
+        except Exception as _e:
+            st.caption(f"主題訊號暫時無法載入（{_e}）")
+
+        st.markdown("---")
+
+        # ── 📅 未來重要事件 ───────────────────────────────────────────
+        st.markdown("### 📅 未來 60 天重要事件")
+        try:
+            if "_radar" not in dir():
+                from radar_loader import RadarLoader as _RL
+                _radar = _RL()
+            _events = _radar.get_upcoming_events(days=60)
+            render_event_calendar(_events)
+        except Exception as _e:
+            st.caption(f"事件日程暫時無法載入（{_e}）")
+
+        st.markdown("---")
+
+        # ── 📊 宏觀快照 ──────────────────────────────────────────────
+        st.markdown("### 📊 宏觀快照")
+        try:
+            _macro_snap = st.session_state.get("_radar_macro_snap")
+            if not _macro_snap:
+                from macro_loader import MacroLoader as _ML
+                _macro_snap = _ML().get_snapshot()
+                st.session_state["_radar_macro_snap"] = _macro_snap
+            render_macro_bar(_macro_snap)
+        except Exception as _e:
+            st.caption(f"宏觀指標暫時無法載入（{_e}）")
+
+        st.markdown("---")
+
+        # ── 🇺🇸 美股連動（原有內容）───────────────────────────────────
+        st.markdown("### 🇺🇸 美股連動分析")
         st.caption("資料來源：yfinance（免費，15分鐘延遲）｜每小時自動更新")
 
         # 載入美股資料
@@ -1607,10 +1115,7 @@ def main():
                     for item in items[:4]:
                         st.markdown(f"- [{item['title']}]({item['link']}) `{item['published'][:10]}`")
 
-    # ========== Tab 2: 候選清單 ==========
-
-    # ========== Tab 3: 個股分析 ==========
-    with tabs[2]:
+    def _render_tab_stock_analysis():
         st.subheader("個股分析")
         # 處理熱度排行/產業總覽的「完整分析」跳轉
         _goto = st.session_state.pop("goto_ticker", None)
@@ -2371,8 +1876,7 @@ def main():
                         st.info("將此股票加入追蹤清單後，系統會自動抓取新聞與情緒資料。")
 
 
-    # ========== Tab 4: 持倉管理 ==========
-    with tabs[3]:
+    def _render_tab_portfolio():
         st.subheader("💼 我的持倉管理")
         port: Portfolio = st.session_state.portfolio
 
@@ -2536,8 +2040,7 @@ def main():
                         port.remove_holding(ticker)
                         st.rerun()
 
-    # ========== Tab 5: 追蹤清單 ==========
-    with tabs[4]:
+    def _render_tab_watchlist():
         st.subheader("⭐ 追蹤清單")
 
         if not st.session_state.watchlist:
@@ -3035,8 +2538,7 @@ def main():
 
 
 
-    # ========== Tab 6: 熱度排行 ==========
-    with tabs[5]:
+    def _render_tab_heat():
         st.subheader("🔥 產業熱度排行")
         if model_df.empty:
             st.warning("⚠️ 請先載入市場資料")
@@ -3194,8 +2696,7 @@ def main():
                                     st.session_state["goto_ticker"] = sel_ticker_heat
                                     st.rerun()
 
-    # ========== Tab 7: 產業瀏覽器（供應鏈二欄式儀表板）==========
-    with tabs[6]:
+    def _render_tab_industry():
         st.subheader("📊 產業 / 概念股瀏覽器")
         if model_df.empty:
             st.warning("⚠️ 請先載入市場資料")
@@ -3287,9 +2788,13 @@ def main():
 
                         m1, m2, m3, m4 = st.columns(4)
                         m1.metric("平均漲跌", f"{avg_chg:+.2f}%" if pd.notna(avg_chg) else "--")
-                        m2.metric("外資合計", f"{int(total_fn):+,}張" if pd.notna(total_fn) else "--")
+                        m2.metric("外資合計(全族群)", f"{int(total_fn):+,}張" if pd.notna(total_fn) else "--",
+                                  help="本族群所有成分股外資買賣超的加總（非單一個股）。"
+                                       "個股數字請見下方清單的「籌碼」欄。單位：張。")
                         m3.metric("平均風險分", f"{avg_risk:.0f}" if pd.notna(avg_risk) else "--")
                         m4.metric("平均PE", f"{avg_pe:.1f}x" if pd.notna(avg_pe) and avg_pe > 0 else "--")
+                        st.caption("ℹ️ 「外資合計(全族群)」= 本族群所有成分股的外資買賣超加總，"
+                                   "**不是**單一個股數字；個股外資張數見下方清單「籌碼」欄。")
 
                     st.markdown("---")
 
@@ -3353,7 +2858,7 @@ def main():
                             "欄位說明：**代號**=股票代碼 ｜ **收盤**=當日收盤價(元) ｜ "
                             "**漲跌%**=今日漲跌幅（▲紅=漲/▼綠=跌） ｜ "
                             "**成交量**=今日成交量(萬張) ｜ "
-                            "**籌碼**=外資今日方向（🟢買超/🔴賣超/🟡持平或無資料） ｜ "
+                            "**籌碼**=外資今日買賣超(張)（🟢買超/🔴賣超/🟡持平或無資料，正=買超 負=賣超） ｜ "
                             "**等級**=模型候選等級（核心>觀察）"
                         )
                         # ── 三竹風格：HTML 卡片行清單 ─────────────────────────
@@ -3368,7 +2873,7 @@ def main():
 .sc-px{width:68px;text-align:right;font-weight:600;flex-shrink:0;}
 .sc-chg{width:80px;text-align:right;font-weight:600;flex-shrink:0;}
 .sc-vol{width:72px;text-align:right;color:#8b949e;font-size:12px;flex-shrink:0;}
-.sc-sig{width:60px;text-align:center;font-size:13px;flex-shrink:0;}
+.sc-sig{width:108px;text-align:right;font-size:12px;flex-shrink:0;}
 .sc-lv{width:52px;text-align:center;font-size:11px;flex-shrink:0;}
 .up{color:#ef5350;}.down{color:#26a69a;}
 .badge-c{background:#1f6feb22;color:#388bfd;border:1px solid #1f6feb;border-radius:3px;padding:1px 4px;}
@@ -3400,9 +2905,19 @@ def main():
                             chg_c = "up" if (chg and chg > 0) else ("down" if chg and chg < 0 else "")
                             chg_s = (f"▲{chg:.2f}%" if chg and chg > 0
                                      else f"▼{abs(chg):.2f}%" if chg and chg < 0 else "--")
-                            vol_s = f"{int(vol/10000)}萬" if pd.notna(vol) and vol else "--"
-                            sig   = ("🟢" if (pd.notna(fn) and fn > 0)
-                                     else ("🔴" if (pd.notna(fn) and fn < 0) else "🟡"))
+                            vol_s = f"{vol/10000:.1f}萬" if pd.notna(vol) and vol else "--"
+                            # 籌碼欄：燈號 + 外資買賣超張數（顏色與燈號一致，買超綠/賣超紅）
+                            if pd.notna(fn):
+                                _fn_i = int(fn)
+                                if _fn_i > 0:
+                                    _dot, _col = "🟢", "#3fb950"
+                                elif _fn_i < 0:
+                                    _dot, _col = "🔴", "#f85149"
+                                else:
+                                    _dot, _col = "🟡", "#8b949e"
+                                sig = f'{_dot}<span style="color:{_col}"> {_fn_i:+,}</span>'
+                            else:
+                                sig = "🟡 --"
                             nm    = str(r.get("name", ""))[:8].replace("<", "&lt;").replace(">", "&gt;")
                             lv_html = ""
                             if level == "核心候選":
@@ -3463,8 +2978,7 @@ def main():
                                 st.caption("產業新聞載入失敗")
 
 
-    # ========== Tab 8: 模型設定 ==========
-    with tabs[7]:
+    def _render_tab_settings():
         st.subheader("模型設定與權重")
 
         # ── FinMind Token 設定 ──
@@ -3623,27 +3137,35 @@ def main():
             if uploaded_backup is not None:
                 try:
                     restored = _json.load(uploaded_backup)
-                    if st.button("✅ 確認還原", use_container_width=True, key="confirm_restore"):
-                        if "portfolio" in restored:
-                            st.session_state.portfolio._holdings = restored["portfolio"]
-                            st.session_state.portfolio.save()
-                        if "watchlist" in restored:
-                            st.session_state.watchlist = restored["watchlist"]
-                            write_json(WATCHLIST_FILE, restored["watchlist"])
-                        if "notes" in restored:
-                            st.session_state.notes = restored["notes"]
-                            write_json(NOTES_FILE, restored["notes"])
-                        if "snapshots" in restored:
-                            st.session_state.snapshots = restored["snapshots"]
-                            write_json(SNAPSHOT_FILE, restored["snapshots"])
-                        st.success("✅ 資料還原完成！")
-                        st.rerun()
+                    ok, errors = validate_backup(restored)
+                    if not ok:
+                        st.error("❌ 備份檔驗證失敗：\n" + "\n".join(f"- {e}" for e in errors))
+                    else:
+                        preview = preview_backup(restored)
+                        st.info("**還原預覽：**\n" + "　".join(f"{k}: {v}" for k, v in preview.items()))
+                        if st.button("✅ 確認還原", use_container_width=True, key="confirm_restore"):
+                            if "portfolio" in restored:
+                                st.session_state.portfolio._holdings = restored["portfolio"]
+                                st.session_state.portfolio.save()
+                            success, msg = restore_backup(
+                                restored, WATCHLIST_FILE, NOTES_FILE, SNAPSHOT_FILE
+                            )
+                            if success:
+                                if "watchlist" in restored:
+                                    st.session_state.watchlist = restored["watchlist"]
+                                if "notes" in restored:
+                                    st.session_state.notes = restored["notes"]
+                                if "snapshots" in restored:
+                                    st.session_state.snapshots = restored["snapshots"]
+                                st.success("✅ 資料還原完成！")
+                                st.rerun()
+                            else:
+                                st.error(f"❌ {msg}")
                 except Exception as e:
                     st.error(f"❌ 備份檔格式錯誤：{e}")
 
 
-    # ========== Tab 9: 潛力股 ==========
-    with tabs[8]:
+    def _render_tab_potential():
         st.subheader("🎯 每日潛力補漲候選")
         st.caption("⚠️ 以下為模型信號，不構成投資建議。請結合基本面自行判斷。")
 
@@ -3771,8 +3293,7 @@ def main():
                 else:
                     st.info("目前追蹤清單股票中，尚無今年 EPS 進度明顯超越去年的標的（可能資料不足）。")
 
-    # ========== Tab 10: ETF 排行 ==========
-    with tabs[9]:
+    def _render_tab_etf():
         st.subheader("📈 ETF 績效排行")
         st.caption("⚠️ 報酬率為統計性指標，不構成投資建議。ETF 成分股資料來自 yfinance，台灣 ETF 可能資料不足。")
 
@@ -3890,6 +3411,49 @@ def main():
                                     st.caption("⚠️ 台灣 ETF 成分股資料不足（yfinance 未收錄此 ETF 的持股明細）")
                             except Exception:
                                 st.caption("⚠️ 成分股資料載入失敗")
+
+
+    # ============================================================
+    # 5-Tab 主導覽（情勢雷達 → 主題供應鏈 → 候選篩選 → 個股研究 → 追蹤與組合）
+    # ============================================================
+    tabs = st.tabs([
+        "🎯 候選篩選",
+        "🌍 情勢雷達",
+        "🔍 個股研究",
+        "🔥 主題供應鏈",
+        "⭐ 追蹤與組合",
+    ])
+
+    with tabs[0]:
+        _ct = st.tabs(["🏆 綜合推薦", "🎯 潛力股"])
+        with _ct[0]:
+            _render_tab_overall()
+        with _ct[1]:
+            _render_tab_potential()
+
+    with tabs[1]:
+        _render_tab_radar()
+
+    with tabs[2]:
+        _render_tab_stock_analysis()
+
+    with tabs[3]:
+        _tt = st.tabs(["🔥 熱度排行", "📊 產業瀏覽器"])
+        with _tt[0]:
+            _render_tab_heat()
+        with _tt[1]:
+            _render_tab_industry()
+
+    with tabs[4]:
+        _wt = st.tabs(["⭐ 追蹤清單", "💼 持倉管理", "📈 ETF 排行", "⚙️ 模型設定"])
+        with _wt[0]:
+            _render_tab_watchlist()
+        with _wt[1]:
+            _render_tab_portfolio()
+        with _wt[2]:
+            _render_tab_etf()
+        with _wt[3]:
+            _render_tab_settings()
 
 
 # ============================================================

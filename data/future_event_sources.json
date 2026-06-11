@@ -1,0 +1,240 @@
+{
+  "schema_version": 1,
+  "description": "Fixed free and authoritative sources for future events that may affect Taiwan technology supply chains or financial markets.",
+  "sources": [
+    {
+      "id": "fed_fomc",
+      "name": "Federal Reserve FOMC Calendar",
+      "category": "macro_rates",
+      "url": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "method": "html_schedule",
+      "trust_level": "A",
+      "refresh": "daily"
+    },
+    {
+      "id": "bls_cpi",
+      "name": "U.S. BLS CPI Schedule",
+      "category": "macro_inflation",
+      "url": "https://www.bls.gov/schedule/news_release/cpi.htm",
+      "method": "html_schedule",
+      "trust_level": "A",
+      "refresh": "daily"
+    },
+    {
+      "id": "bls_ics",
+      "name": "U.S. BLS Release ICS",
+      "category": "macro_inflation",
+      "url": "https://www.bls.gov/schedule/news_release/bls.ics",
+      "method": "ics",
+      "trust_level": "A",
+      "refresh": "daily"
+    },
+    {
+      "id": "bea_schedule",
+      "name": "U.S. BEA News Schedule",
+      "category": "macro_growth",
+      "url": "https://www.bea.gov/news/schedule/",
+      "method": "html_schedule",
+      "trust_level": "A",
+      "refresh": "daily"
+    },
+    {
+      "id": "boj_calendar",
+      "name": "Bank of Japan Calendar",
+      "category": "macro_rates",
+      "url": "https://www.boj.or.jp/en/about/calendar/",
+      "method": "html_schedule",
+      "trust_level": "A",
+      "refresh": "daily"
+    },
+    {
+      "id": "tw_stats_calendar",
+      "name": "Taiwan National Statistics Release Calendar",
+      "category": "taiwan_macro",
+      "url": "https://www.stat.gov.tw/News_NoticeCalendar.aspx",
+      "method": "html_schedule",
+      "trust_level": "A",
+      "refresh": "daily"
+    },
+    {
+      "id": "moea_stats",
+      "name": "Taiwan MOEA Statistics",
+      "category": "taiwan_industry",
+      "url": "https://www.moea.gov.tw/Mns/dos_e/content/Content.aspx?menu_id=6747&sub_menu_id=21033",
+      "method": "html_schedule",
+      "trust_level": "A",
+      "refresh": "daily"
+    },
+    {
+      "id": "twse_apply_listing",
+      "name": "TWSE Apply Listing",
+      "category": "ipo",
+      "url": "https://www.twse.com.tw/en/company/applylisting",
+      "method": "html_watch",
+      "trust_level": "A",
+      "refresh": "daily"
+    },
+    {
+      "id": "tpex_ipo",
+      "name": "TPEx IPO / ESB",
+      "category": "ipo",
+      "url": "https://www.tpex.org.tw/en-us/esb/listed/ipo.html",
+      "method": "html_watch",
+      "trust_level": "A",
+      "refresh": "daily"
+    },
+    {
+      "id": "sec_edgar",
+      "name": "SEC EDGAR Filings",
+      "category": "ipo",
+      "url": "https://www.sec.gov/search-filings",
+      "method": "filing_search",
+      "trust_level": "A",
+      "refresh": "daily"
+    },
+    {
+      "id": "sec_rss",
+      "name": "SEC RSS Feeds",
+      "category": "ipo",
+      "url": "https://www.sec.gov/about/rss-feeds",
+      "method": "rss",
+      "trust_level": "A",
+      "refresh": "daily"
+    },
+    {
+      "id": "computex",
+      "name": "COMPUTEX Taipei",
+      "category": "tech_event",
+      "url": "https://www.computextaipei.com.tw/en/index.html",
+      "method": "official_site",
+      "trust_level": "A",
+      "refresh": "weekly"
+    },
+    {
+      "id": "semicon_taiwan",
+      "name": "SEMICON Taiwan",
+      "category": "semiconductor_event",
+      "url": "https://semicontaiwan.org/",
+      "method": "official_site",
+      "trust_level": "A",
+      "refresh": "weekly"
+    },
+    {
+      "id": "ai_expo_taiwan",
+      "name": "AI EXPO Taiwan",
+      "category": "ai_event",
+      "url": "https://ai-expo.tw/",
+      "method": "official_site",
+      "trust_level": "B",
+      "refresh": "weekly"
+    },
+    {
+      "id": "tsmc_calendar",
+      "name": "TSMC Financial Calendar",
+      "category": "company_ir",
+      "url": "https://investor.tsmc.com/english/financial-calendar",
+      "method": "official_ir",
+      "trust_level": "A",
+      "refresh": "daily"
+    },
+    {
+      "id": "mediatek_ir_events",
+      "name": "MediaTek IR Events",
+      "category": "company_ir",
+      "url": "https://www.mediatek.com/investor-relations/ir-events",
+      "method": "official_ir",
+      "trust_level": "A",
+      "refresh": "daily"
+    },
+    {
+      "id": "nvidia_gtc",
+      "name": "NVIDIA GTC / Events",
+      "category": "ai_platform",
+      "url": "https://www.nvidia.com/gtc/events/",
+      "method": "official_site",
+      "trust_level": "A",
+      "refresh": "weekly"
+    },
+    {
+      "id": "eia_upcoming",
+      "name": "U.S. EIA Upcoming Reports",
+      "category": "energy",
+      "url": "https://www.eia.gov/reports/upcoming.php",
+      "method": "html_schedule",
+      "trust_level": "A",
+      "refresh": "daily"
+    },
+    {
+      "id": "eia_wpsr",
+      "name": "U.S. EIA Weekly Petroleum Status Report",
+      "category": "energy",
+      "url": "https://www.eia.gov/petroleum/supply/weekly/index.php",
+      "method": "html_schedule",
+      "trust_level": "A",
+      "refresh": "daily"
+    },
+    {
+      "id": "opec_press",
+      "name": "OPEC Press Releases",
+      "category": "energy",
+      "url": "https://www.opec.org/press-releases.html",
+      "method": "html_watch",
+      "trust_level": "A",
+      "refresh": "daily"
+    },
+    {
+      "id": "lme",
+      "name": "London Metal Exchange",
+      "category": "commodities",
+      "url": "https://www.lme.com/",
+      "method": "official_site",
+      "trust_level": "A",
+      "refresh": "daily"
+    },
+    {
+      "id": "scfi",
+      "name": "Shanghai Shipping Exchange SCFI",
+      "category": "shipping",
+      "url": "https://en.sse.net.cn/indices/scfi.jsp",
+      "method": "official_index",
+      "trust_level": "A",
+      "refresh": "weekly"
+    },
+    {
+      "id": "marad_advisories",
+      "name": "U.S. MARAD Advisories",
+      "category": "geopolitics_shipping",
+      "url": "https://www.maritime.dot.gov/msci-advisories",
+      "method": "official_advisory",
+      "trust_level": "A",
+      "refresh": "daily"
+    },
+    {
+      "id": "ukmto",
+      "name": "UKMTO Products",
+      "category": "geopolitics_shipping",
+      "url": "https://www.ukmto.org/ukmto-products",
+      "method": "official_advisory",
+      "trust_level": "A",
+      "refresh": "daily"
+    },
+    {
+      "id": "apple_developer",
+      "name": "Apple Developer WWDC",
+      "category": "ai_platform",
+      "url": "https://developer.apple.com/wwdc26/",
+      "method": "official_site",
+      "trust_level": "A",
+      "refresh": "weekly"
+    },
+    {
+      "id": "smallsat",
+      "name": "Small Satellite Conference",
+      "category": "leo_satellite",
+      "url": "https://smallsat.org/",
+      "method": "official_site",
+      "trust_level": "A",
+      "refresh": "weekly"
+    }
+  ]
+}

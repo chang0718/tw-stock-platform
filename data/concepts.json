@@ -1,0 +1,752 @@
+{
+  "concepts": [
+    {
+      "id": "ai_server",
+      "name": "AI 伺服器",
+      "keywords": [
+        "AI伺服器",
+        "GPU伺服器",
+        "AI server",
+        "data center",
+        "GB200",
+        "GB300",
+        "NVL72",
+        "NVIDIA",
+        "ASIC",
+        "CSP",
+        "雲端資本支出"
+      ],
+      "subindustries": [
+        {
+          "name": "ASIC / IP / 晶片平台",
+          "keywords": [
+            "ASIC",
+            "IP",
+            "NRE",
+            "HBM",
+            "HPC"
+          ],
+          "companies": [
+            {
+              "ticker": "3661",
+              "name": "世芯-KY",
+              "aliases": [
+                "Alchip"
+              ]
+            },
+            {
+              "ticker": "3443",
+              "name": "創意",
+              "aliases": [
+                "GUC"
+              ]
+            },
+            {
+              "ticker": "2454",
+              "name": "聯發科",
+              "aliases": [
+                "MediaTek"
+              ]
+            },
+            {
+              "ticker": "2379",
+              "name": "瑞昱",
+              "aliases": [
+                "Realtek"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "伺服器 ODM / EMS",
+          "keywords": [
+            "ODM",
+            "server ODM",
+            "AI server",
+            "rack",
+            "出貨",
+            "backlog"
+          ],
+          "companies": [
+            {
+              "ticker": "2382",
+              "name": "廣達",
+              "aliases": [
+                "Quanta"
+              ]
+            },
+            {
+              "ticker": "3231",
+              "name": "緯創",
+              "aliases": [
+                "Wistron"
+              ]
+            },
+            {
+              "ticker": "6669",
+              "name": "緯穎",
+              "aliases": [
+                "Wiwynn"
+              ]
+            },
+            {
+              "ticker": "2317",
+              "name": "鴻海",
+              "aliases": [
+                "Foxconn",
+                "Hon Hai"
+              ]
+            },
+            {
+              "ticker": "2356",
+              "name": "英業達",
+              "aliases": [
+                "Inventec"
+              ]
+            },
+            {
+              "ticker": "2324",
+              "name": "仁寶",
+              "aliases": [
+                "Compal"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "雲端 / 品牌客戶",
+          "keywords": [
+            "CSP",
+            "hyperscaler",
+            "Microsoft",
+            "Google",
+            "Amazon",
+            "Meta",
+            "OpenAI",
+            "Oracle",
+            "xAI"
+          ],
+          "companies": []
+        }
+      ]
+    },
+    {
+      "id": "advanced_packaging",
+      "name": "先進封裝 / CoWoS",
+      "keywords": [
+        "CoWoS",
+        "SoIC",
+        "FOPLP",
+        "2.5D",
+        "3D封裝",
+        "interposer",
+        "HBM",
+        "Chiplet"
+      ],
+      "subindustries": [
+        {
+          "name": "晶圓代工 / 封裝平台",
+          "keywords": [
+            "TSMC",
+            "CoWoS產能",
+            "先進封裝"
+          ],
+          "companies": [
+            {
+              "ticker": "2330",
+              "name": "台積電",
+              "aliases": [
+                "TSMC"
+              ]
+            },
+            {
+              "ticker": "2303",
+              "name": "聯電",
+              "aliases": [
+                "UMC"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "封測 / 測試",
+          "keywords": [
+            "OSAT",
+            "測試",
+            "burn-in",
+            "探針卡"
+          ],
+          "companies": [
+            {
+              "ticker": "3711",
+              "name": "日月光投控",
+              "aliases": [
+                "ASE"
+              ]
+            },
+            {
+              "ticker": "6239",
+              "name": "力成",
+              "aliases": [
+                "PTI"
+              ]
+            },
+            {
+              "ticker": "2449",
+              "name": "京元電子",
+              "aliases": [
+                "KYEC"
+              ]
+            },
+            {
+              "ticker": "6510",
+              "name": "精測",
+              "aliases": [
+                "CHPT"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "載板 / 設備材料",
+          "keywords": [
+            "ABF",
+            "載板",
+            "中介層",
+            "設備"
+          ],
+          "companies": [
+            {
+              "ticker": "3131",
+              "name": "弘塑",
+              "aliases": [
+                "Grand Process"
+              ]
+            },
+            {
+              "ticker": "8028",
+              "name": "昇陽半導體",
+              "aliases": [
+                "PSI"
+              ]
+            },
+            {
+              "ticker": "3037",
+              "name": "欣興",
+              "aliases": [
+                "Unimicron"
+              ]
+            },
+            {
+              "ticker": "8046",
+              "name": "南電",
+              "aliases": [
+                "Nan Ya PCB"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "thermal_power",
+      "name": "散熱 / 電源",
+      "keywords": [
+        "散熱",
+        "thermal",
+        "液冷",
+        "liquid cooling",
+        "cold plate",
+        "CDU",
+        "PSU",
+        "BBU",
+        "UPS"
+      ],
+      "subindustries": [
+        {
+          "name": "散熱模組",
+          "keywords": [
+            "液冷",
+            "風扇",
+            "VC",
+            "散熱模組"
+          ],
+          "companies": [
+            {
+              "ticker": "3017",
+              "name": "奇鋐",
+              "aliases": [
+                "AVC"
+              ]
+            },
+            {
+              "ticker": "3324",
+              "name": "雙鴻",
+              "aliases": [
+                "Auras"
+              ]
+            },
+            {
+              "ticker": "2421",
+              "name": "建準",
+              "aliases": [
+                "Sunon"
+              ]
+            },
+            {
+              "ticker": "3653",
+              "name": "健策",
+              "aliases": [
+                "Jentech"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "電源 / 能源管理",
+          "keywords": [
+            "電源",
+            "PSU",
+            "BBU",
+            "UPS",
+            "儲能"
+          ],
+          "companies": [
+            {
+              "ticker": "2308",
+              "name": "台達電",
+              "aliases": [
+                "Delta Electronics"
+              ]
+            },
+            {
+              "ticker": "2354",
+              "name": "鴻準",
+              "aliases": [
+                "Foxconn Tech"
+              ]
+            },
+            {
+              "ticker": "6412",
+              "name": "群電",
+              "aliases": [
+                "Chicony Power"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pcb_abf",
+      "name": "PCB / ABF 載板",
+      "keywords": [
+        "PCB",
+        "ABF",
+        "IC載板",
+        "HDI",
+        "server board",
+        "CCL",
+        "copper clad laminate",
+        "HVLP"
+      ],
+      "subindustries": [
+        {
+          "name": "PCB / 載板",
+          "keywords": [
+            "server PCB",
+            "ABF載板",
+            "HDI",
+            "高階PCB"
+          ],
+          "companies": [
+            {
+              "ticker": "3037",
+              "name": "欣興",
+              "aliases": [
+                "Unimicron"
+              ]
+            },
+            {
+              "ticker": "8046",
+              "name": "南電",
+              "aliases": [
+                "Nan Ya PCB"
+              ]
+            },
+            {
+              "ticker": "2313",
+              "name": "華通",
+              "aliases": [
+                "Compeq"
+              ]
+            },
+            {
+              "ticker": "2368",
+              "name": "金像電",
+              "aliases": [
+                "GCE"
+              ]
+            },
+            {
+              "ticker": "3189",
+              "name": "景碩",
+              "aliases": [
+                "Kinsus"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "材料 / CCL",
+          "keywords": [
+            "CCL",
+            "銅箔基板",
+            "HVLP",
+            "玻纖"
+          ],
+          "companies": [
+            {
+              "ticker": "2383",
+              "name": "台光電",
+              "aliases": [
+                "Elite Material",
+                "EMC"
+              ]
+            },
+            {
+              "ticker": "6274",
+              "name": "台燿",
+              "aliases": [
+                "TUC"
+              ]
+            },
+            {
+              "ticker": "8358",
+              "name": "金居",
+              "aliases": [
+                "Co-Tech"
+              ]
+            },
+            {
+              "ticker": "1815",
+              "name": "富喬",
+              "aliases": [
+                "Fulltech"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cpo_optical",
+      "name": "光通訊 / CPO",
+      "keywords": [
+        "CPO",
+        "co-packaged optics",
+        "silicon photonics",
+        "optical transceiver",
+        "800G",
+        "1.6T",
+        "LPO",
+        "switch"
+      ],
+      "subindustries": [
+        {
+          "name": "光通訊元件",
+          "keywords": [
+            "光收發",
+            "800G",
+            "1.6T",
+            "LPO"
+          ],
+          "companies": [
+            {
+              "ticker": "3081",
+              "name": "聯亞",
+              "aliases": [
+                "LandMark"
+              ]
+            },
+            {
+              "ticker": "3363",
+              "name": "上詮",
+              "aliases": [
+                "FOCI"
+              ]
+            },
+            {
+              "ticker": "4979",
+              "name": "華星光",
+              "aliases": [
+                "LuxNet"
+              ]
+            },
+            {
+              "ticker": "4908",
+              "name": "前鼎",
+              "aliases": [
+                "AOC"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "網通 / 交換器",
+          "keywords": [
+            "switch",
+            "Ethernet",
+            "交換器"
+          ],
+          "companies": [
+            {
+              "ticker": "2345",
+              "name": "智邦",
+              "aliases": [
+                "Accton"
+              ]
+            },
+            {
+              "ticker": "3596",
+              "name": "智易",
+              "aliases": [
+                "Arcadyan"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "robotics",
+      "name": "機器人 / 實體 AI",
+      "keywords": [
+        "機器人",
+        "robotics",
+        "humanoid",
+        "physical AI",
+        "automation",
+        "cobot",
+        "actuator"
+      ],
+      "subindustries": [
+        {
+          "name": "傳動 / 控制 / 自動化",
+          "keywords": [
+            "linear guide",
+            "actuator",
+            "servo",
+            "motion control"
+          ],
+          "companies": [
+            {
+              "ticker": "2049",
+              "name": "上銀",
+              "aliases": [
+                "HIWIN"
+              ]
+            },
+            {
+              "ticker": "1590",
+              "name": "亞德客-KY",
+              "aliases": [
+                "Airtac"
+              ]
+            },
+            {
+              "ticker": "3379",
+              "name": "彬台",
+              "aliases": []
+            }
+          ]
+        },
+        {
+          "name": "組裝 / 邊緣 AI",
+          "keywords": [
+            "robot assembly",
+            "edge AI",
+            "system integration"
+          ],
+          "companies": [
+            {
+              "ticker": "2317",
+              "name": "鴻海",
+              "aliases": [
+                "Foxconn"
+              ]
+            },
+            {
+              "ticker": "2356",
+              "name": "英業達",
+              "aliases": [
+                "Inventec"
+              ]
+            },
+            {
+              "ticker": "2308",
+              "name": "台達電",
+              "aliases": [
+                "Delta"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "satellite_space",
+      "name": "低軌衛星 / 通訊",
+      "keywords": [
+        "低軌衛星",
+        "LEO",
+        "satellite",
+        "RF",
+        "Starlink",
+        "Ku band",
+        "Ka band",
+        "地面終端"
+      ],
+      "subindustries": [
+        {
+          "name": "RF / 地面終端",
+          "keywords": [
+            "RF",
+            "PA",
+            "antenna",
+            "地面終端"
+          ],
+          "companies": [
+            {
+              "ticker": "3491",
+              "name": "昇達科",
+              "aliases": [
+                "Universal Microwave"
+              ]
+            },
+            {
+              "ticker": "2454",
+              "name": "聯發科",
+              "aliases": [
+                "MediaTek"
+              ]
+            },
+            {
+              "ticker": "2313",
+              "name": "華通",
+              "aliases": [
+                "Compeq"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "網通 / 組裝",
+          "keywords": [
+            "terminal",
+            "gateway",
+            "networking"
+          ],
+          "companies": [
+            {
+              "ticker": "2317",
+              "name": "鴻海",
+              "aliases": [
+                "Foxconn"
+              ]
+            },
+            {
+              "ticker": "2324",
+              "name": "仁寶",
+              "aliases": [
+                "Compal"
+              ]
+            },
+            {
+              "ticker": "2345",
+              "name": "智邦",
+              "aliases": [
+                "Accton"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "macro_event",
+      "name": "總經 / 地緣 / 原物料",
+      "keywords": [
+        "CPI",
+        "PCE",
+        "FOMC",
+        "升息",
+        "降息",
+        "美債殖利率",
+        "美元",
+        "原油",
+        "天然氣",
+        "銅價",
+        "稀土",
+        "戰爭",
+        "制裁",
+        "出口管制",
+        "紅海",
+        "航運"
+      ],
+      "subindustries": [
+        {
+          "name": "利率 / 匯率 / 美債",
+          "keywords": [
+            "Fed",
+            "FOMC",
+            "CPI",
+            "PCE",
+            "Treasury yield",
+            "美元指數"
+          ],
+          "companies": []
+        },
+        {
+          "name": "能源 / 原物料 / 航運",
+          "keywords": [
+            "EIA",
+            "OPEC",
+            "Brent",
+            "WTI",
+            "copper",
+            "LME",
+            "SCFI",
+            "war risk"
+          ],
+          "companies": [
+            {
+              "ticker": "2383",
+              "name": "台光電",
+              "aliases": []
+            },
+            {
+              "ticker": "6274",
+              "name": "台燿",
+              "aliases": []
+            },
+            {
+              "ticker": "8358",
+              "name": "金居",
+              "aliases": []
+            },
+            {
+              "ticker": "1815",
+              "name": "富喬",
+              "aliases": []
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "reference_notes": [
+    "概念股清單是監控用 watchlist，不代表受惠事實或投資建議。",
+    "任何公司受惠判定需回到月營收、財報、法說會、公司公告、交易所公告或可信媒體引用的原始來源。"
+  ]
+}

@@ -1,0 +1,94 @@
+{
+  "schema_version": 2,
+  "rules": [
+    {
+      "id": "macro_rates_to_growth_tech",
+      "chain_ids": [
+        "ai_server_supply_chain",
+        "semiconductor_supply_chain"
+      ],
+      "direction": "mixed",
+      "mechanism": "通膨與利率會改變折現率、美元、美債殖利率與風險偏好；高成長科技股估值可能受壓，但若數據確認降息路徑，AI與半導體風險偏好可能回升。"
+    },
+    {
+      "id": "ai_platform_to_server_chain",
+      "chain_ids": [
+        "ai_server_supply_chain",
+        "advanced_packaging_chain"
+      ],
+      "direction": "positive_watch",
+      "mechanism": "AI 平台、雲端 capex 或官方產品 roadmap 若被確認，可能拉動 GPU/ASIC、先進封裝、PCB、散熱、電源與 ODM 需求。"
+    },
+    {
+      "id": "semiconductor_roadmap_to_supply_chain",
+      "chain_ids": [
+        "semiconductor_supply_chain"
+      ],
+      "direction": "mixed",
+      "mechanism": "製程 roadmap 會影響設備、材料、IC設計與封測需求；需同時觀察產能、良率、客戶導入與資本支出。"
+    },
+    {
+      "id": "advanced_packaging_to_components",
+      "chain_ids": [
+        "ai_server_supply_chain",
+        "semiconductor_supply_chain",
+        "advanced_packaging_chain"
+      ],
+      "direction": "positive_watch",
+      "mechanism": "CoWoS、HBM、CPO 或 2.5D/3D 封裝擴產會牽動載板、測試、散熱與 AI 加速器供應鏈。"
+    },
+    {
+      "id": "leo_to_rf_ground_chain",
+      "chain_ids": [
+        "leo_satellite_supply_chain"
+      ],
+      "direction": "positive_watch",
+      "mechanism": "低軌衛星與地面終端部署會帶動 RF、PCB、電源、散熱、網通設備與 EMS 觀察需求。"
+    },
+    {
+      "id": "robotics_to_motion_control_chain",
+      "chain_ids": [
+        "robotics_supply_chain"
+      ],
+      "direction": "positive_watch",
+      "mechanism": "實體 AI 與機器人商用化會牽動控制晶片、感測、傳動、馬達、工控電源與系統組裝。"
+    },
+    {
+      "id": "autonomous_vehicle_to_edge_ai_chain",
+      "chain_ids": [
+        "autonomous_vehicle_supply_chain"
+      ],
+      "direction": "mixed",
+      "mechanism": "自動駕駛與 Robotaxi 需同時看監管核准、安全事件、車規認證與量產時程；利多與風險可能並存。"
+    },
+    {
+      "id": "ipo_to_sector_valuation_watch",
+      "chain_ids": [
+        "ai_server_supply_chain",
+        "robotics_supply_chain",
+        "autonomous_vehicle_supply_chain",
+        "leo_satellite_supply_chain"
+      ],
+      "direction": "watch",
+      "mechanism": "代表性 IPO 或上市文件會影響同題材估值錨定與市場關注度，但不得在無招股書或交易所公告時推論確定時程。"
+    },
+    {
+      "id": "energy_commodities_to_cost_chain",
+      "chain_ids": [
+        "energy_commodities_cost_chain"
+      ],
+      "direction": "negative_watch",
+      "mechanism": "油價、天然氣、銅、鋁、稀土與航運保險成本會影響材料成本、交期與毛利率；需用官方庫存、價格與公司財報驗證。"
+    },
+    {
+      "id": "geopolitics_to_supply_chain_risk",
+      "chain_ids": [
+        "semiconductor_supply_chain",
+        "ai_server_supply_chain",
+        "energy_commodities_cost_chain"
+      ],
+      "direction": "mixed",
+      "mechanism": "戰爭、制裁、航道風險與出口管制可能造成供應中斷、成本上升、替代訂單或急單，需以官方公告與可信媒體交叉查核。"
+    }
+  ]
+}

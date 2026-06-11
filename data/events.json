@@ -1,0 +1,666 @@
+{
+  "build_google_news_queries": true,
+  "sources": [
+    {
+      "name": "Google News-Macro Market Events",
+      "url": "https://news.google.com/rss/search?q=%28FOMC+OR+Federal+Reserve+OR+Treasury+yields+OR+CPI+OR+PCE+OR+nonfarm+payrolls+OR+%E7%BE%8E%E5%82%B5+OR+%E5%8D%87%E6%81%AF+OR+%E9%99%8D%E6%81%AF%29+%28technology+OR+semiconductor+OR+stocks+OR+%E5%8F%B0%E8%82%A1+OR+%E7%A7%91%E6%8A%80+OR+%E5%8D%8A%E5%B0%8E%E9%AB%94%29+when%3A7d&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
+      "enabled": true
+    },
+    {
+      "name": "Google News-Tech Conferences",
+      "url": "https://news.google.com/rss/search?q=%28Computex+OR+NVIDIA+GTC+OR+CES+OR+Google+I%2FO+OR+Apple+WWDC+OR+Microsoft+Build%29+%28AI+OR+semiconductor+OR+supply+chain+OR+%E4%BE%9B%E6%87%89%E9%8F%88+OR+%E6%A6%82%E5%BF%B5%E8%82%A1%29+when%3A7d&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
+      "enabled": true
+    }
+  ],
+  "event_categories": [
+    {
+      "id": "us_rates_treasury",
+      "name": "美國利率 / 美債 / 通膨數據",
+      "importance": "high",
+      "weight": 5,
+      "keywords": [
+        "FOMC",
+        "Federal Reserve",
+        "Fed",
+        "Powell",
+        "CPI",
+        "PCE",
+        "nonfarm",
+        "payrolls",
+        "Treasury yield",
+        "10-year yield",
+        "美債",
+        "十年期美債",
+        "升息",
+        "降息",
+        "利率決議",
+        "點陣圖",
+        "通膨"
+      ],
+      "query_terms": [
+        "FOMC",
+        "Federal Reserve",
+        "Treasury yields",
+        "CPI",
+        "PCE",
+        "nonfarm payrolls",
+        "美債",
+        "升息",
+        "降息",
+        "通膨"
+      ],
+      "impact_rules": [
+        {
+          "direction": "negative",
+          "triggers": [
+            "升息",
+            "higher for longer",
+            "殖利率上升",
+            "yield rises",
+            "通膨高於預期",
+            "hawkish",
+            "美債殖利率升"
+          ],
+          "affected_industries": [
+            "高本益比科技股",
+            "AI伺服器",
+            "半導體設備",
+            "成長股",
+            "電子零組件"
+          ],
+          "affected_concepts": [
+            "AI 伺服器",
+            "先進封裝 / CoWoS",
+            "光通訊 / CPO",
+            "機器人 / 自動化"
+          ],
+          "reason": "折現率上升會壓縮長久期成長股估值；美元與美債殖利率走強也可能壓抑外資風險偏好。",
+          "confidence": "macro transmission rule"
+        },
+        {
+          "direction": "positive",
+          "triggers": [
+            "降息",
+            "rate cut",
+            "殖利率下滑",
+            "yield falls",
+            "通膨降溫",
+            "dovish",
+            "寬鬆"
+          ],
+          "affected_industries": [
+            "高本益比科技股",
+            "AI伺服器",
+            "半導體",
+            "消費電子",
+            "網通"
+          ],
+          "affected_concepts": [
+            "AI 伺服器",
+            "先進封裝 / CoWoS",
+            "PCB / ABF 載板",
+            "光通訊 / CPO"
+          ],
+          "reason": "利率與折現率下行通常有利成長股估值修復，也改善企業資本支出與市場風險承擔。",
+          "confidence": "macro transmission rule"
+        }
+      ]
+    },
+    {
+      "id": "global_central_banks_fx",
+      "name": "全球央行 / 匯率 / 流動性",
+      "importance": "high",
+      "weight": 4,
+      "keywords": [
+        "ECB",
+        "European Central Bank",
+        "BOJ",
+        "Bank of Japan",
+        "央行",
+        "歐洲央行",
+        "日本央行",
+        "台灣央行",
+        "匯率",
+        "美元",
+        "日圓",
+        "台幣",
+        "量化緊縮",
+        "QT",
+        "QE"
+      ],
+      "query_terms": [
+        "ECB",
+        "BOJ",
+        "Bank of Japan",
+        "美元",
+        "日圓",
+        "台幣",
+        "央行",
+        "匯率",
+        "liquidity"
+      ],
+      "impact_rules": [
+        {
+          "direction": "mixed",
+          "triggers": [
+            "美元走強",
+            "台幣貶",
+            "日圓貶",
+            "匯率波動"
+          ],
+          "affected_industries": [
+            "出口電子",
+            "半導體",
+            "零組件",
+            "進口原物料"
+          ],
+          "affected_concepts": [
+            "AI 伺服器",
+            "PCB / ABF 載板",
+            "散熱 / 電源"
+          ],
+          "reason": "本幣貶值可能提高出口換匯收入，但也會增加美元計價設備、原料或債務成本；需回到公司成本結構驗證。",
+          "confidence": "macro transmission rule"
+        }
+      ]
+    },
+    {
+      "id": "geopolitics_trade_controls",
+      "name": "地緣政治 / 關稅 / 出口管制",
+      "importance": "high",
+      "weight": 5,
+      "keywords": [
+        "export controls",
+        "出口管制",
+        "tariff",
+        "關稅",
+        "sanction",
+        "制裁",
+        "US-China",
+        "美中",
+        "Taiwan Strait",
+        "台海",
+        "China restrictions",
+        "晶片禁令",
+        "rare earth",
+        "稀土"
+      ],
+      "query_terms": [
+        "export controls",
+        "tariff",
+        "sanctions",
+        "US China chips",
+        "Taiwan Strait",
+        "rare earth",
+        "出口管制",
+        "關稅",
+        "晶片禁令"
+      ],
+      "impact_rules": [
+        {
+          "direction": "negative",
+          "triggers": [
+            "出口管制",
+            "禁令",
+            "制裁",
+            "關稅",
+            "限制",
+            "retaliation",
+            "稀土管制"
+          ],
+          "affected_industries": [
+            "半導體設備",
+            "AI晶片",
+            "伺服器供應鏈",
+            "中國曝險電子廠",
+            "稀土/磁材依賴產業"
+          ],
+          "affected_concepts": [
+            "AI 伺服器",
+            "先進封裝 / CoWoS",
+            "機器人 / 自動化",
+            "低軌衛星 / 太空通訊"
+          ],
+          "reason": "出口限制與關稅會改變市場可銷售範圍、成本與供應鏈配置，尤其影響高階晶片、設備與跨境製造。",
+          "confidence": "policy transmission rule"
+        },
+        {
+          "direction": "positive",
+          "triggers": [
+            "在地化",
+            "轉單",
+            "供應鏈重組",
+            "subsidy",
+            "補貼",
+            "friend-shoring"
+          ],
+          "affected_industries": [
+            "非中供應鏈",
+            "台灣伺服器ODM",
+            "半導體材料",
+            "封測",
+            "PCB"
+          ],
+          "affected_concepts": [
+            "AI 伺服器",
+            "PCB / ABF 載板",
+            "先進封裝 / CoWoS"
+          ],
+          "reason": "供應鏈重組可能帶來轉單與在地化投資，但是否利多需驗證產能、客戶認證與毛利率。",
+          "confidence": "policy transmission rule"
+        }
+      ]
+    },
+    {
+      "id": "major_tech_conferences",
+      "name": "重要科技會議 / 產品路線圖",
+      "importance": "medium-high",
+      "weight": 4,
+      "keywords": [
+        "CES",
+        "NVIDIA GTC",
+        "GTC",
+        "Computex",
+        "Google I/O",
+        "Apple WWDC",
+        "Microsoft Build",
+        "AMD Advancing AI",
+        "Intel",
+        "TSMC Technology Symposium",
+        "keynote",
+        "developer conference"
+      ],
+      "query_terms": [
+        "NVIDIA GTC",
+        "Computex",
+        "CES",
+        "Google I/O",
+        "Apple WWDC",
+        "Microsoft Build",
+        "AI keynote",
+        "TSMC symposium"
+      ],
+      "impact_rules": [
+        {
+          "direction": "positive",
+          "triggers": [
+            "new platform",
+            "roadmap",
+            "GB300",
+            "Rubin",
+            "ASIC",
+            "AI PC",
+            "agentic AI",
+            "liquid cooling",
+            "CPO",
+            "silicon photonics",
+            "量產",
+            "路線圖"
+          ],
+          "affected_industries": [
+            "AI伺服器",
+            "散熱",
+            "電源",
+            "PCB/ABF",
+            "光通訊",
+            "先進封裝"
+          ],
+          "affected_concepts": [
+            "AI 伺服器",
+            "散熱 / 電源",
+            "PCB / ABF 載板",
+            "光通訊 / CPO",
+            "先進封裝 / CoWoS"
+          ],
+          "reason": "新平台與路線圖會改變下一代規格、零組件需求與供應鏈卡位，需追蹤實際量產時程與認證名單。",
+          "confidence": "product-cycle rule"
+        }
+      ]
+    },
+    {
+      "id": "hyperscaler_capex_earnings",
+      "name": "雲端巨頭財報 / AI資本支出",
+      "importance": "high",
+      "weight": 5,
+      "keywords": [
+        "capex",
+        "capital expenditure",
+        "AI capex",
+        "hyperscaler",
+        "CSP",
+        "Microsoft earnings",
+        "Google earnings",
+        "Amazon earnings",
+        "Meta earnings",
+        "Oracle earnings",
+        "NVIDIA earnings",
+        "雲端資本支出",
+        "AI資本支出",
+        "財報"
+      ],
+      "query_terms": [
+        "AI capex",
+        "hyperscaler capex",
+        "Microsoft earnings AI",
+        "Google earnings AI",
+        "Amazon AWS capex",
+        "Meta capex AI",
+        "NVIDIA earnings"
+      ],
+      "impact_rules": [
+        {
+          "direction": "positive",
+          "triggers": [
+            "capex raised",
+            "上修",
+            "增加資本支出",
+            "AI demand",
+            "GPU demand",
+            "供不應求",
+            "backlog"
+          ],
+          "affected_industries": [
+            "AI伺服器ODM",
+            "GPU供應鏈",
+            "散熱",
+            "電源",
+            "PCB/ABF",
+            "光通訊"
+          ],
+          "affected_concepts": [
+            "AI 伺服器",
+            "散熱 / 電源",
+            "PCB / ABF 載板",
+            "光通訊 / CPO",
+            "先進封裝 / CoWoS"
+          ],
+          "reason": "雲端巨頭資本支出是 AI 伺服器與資料中心供應鏈的上游需求訊號。",
+          "confidence": "demand transmission rule"
+        },
+        {
+          "direction": "negative",
+          "triggers": [
+            "capex cut",
+            "下修",
+            "放緩",
+            "delayed",
+            "消化庫存",
+            "margin pressure"
+          ],
+          "affected_industries": [
+            "AI伺服器ODM",
+            "零組件",
+            "PCB/ABF",
+            "散熱",
+            "光通訊"
+          ],
+          "affected_concepts": [
+            "AI 伺服器",
+            "PCB / ABF 載板",
+            "散熱 / 電源",
+            "光通訊 / CPO"
+          ],
+          "reason": "資本支出放緩可能造成訂單遞延、庫存調整或估值修正。",
+          "confidence": "demand transmission rule"
+        }
+      ]
+    },
+    {
+      "id": "semiconductor_policy_supply",
+      "name": "半導體政策 / 補貼 / 供應鏈安全",
+      "importance": "medium-high",
+      "weight": 4,
+      "keywords": [
+        "CHIPS Act",
+        "semiconductor subsidy",
+        "晶片法案",
+        "半導體補貼",
+        "晶片補貼",
+        "AI基建補貼",
+        "半導體政策",
+        "advanced manufacturing",
+        "export license",
+        "ASML",
+        "EUV",
+        "DUV"
+      ],
+      "query_terms": [
+        "CHIPS Act",
+        "semiconductor subsidy",
+        "chip subsidy",
+        "ASML EUV",
+        "半導體政策",
+        "晶片法案",
+        "半導體補貼",
+        "晶片補貼"
+      ],
+      "impact_rules": [
+        {
+          "direction": "mixed",
+          "triggers": [
+            "CHIPS Act",
+            "semiconductor subsidy",
+            "chip subsidy",
+            "半導體補貼",
+            "晶片補貼",
+            "AI基建補貼",
+            "晶片法案",
+            "建廠",
+            "產能",
+            "EUV",
+            "license"
+          ],
+          "affected_industries": [
+            "晶圓代工",
+            "設備",
+            "材料",
+            "封測",
+            "在地供應鏈"
+          ],
+          "affected_concepts": [
+            "先進封裝 / CoWoS",
+            "AI 伺服器"
+          ],
+          "reason": "半導體或AI基建補貼可能支持在地投資與供應鏈韌性，但也可能拉高折舊、分散產能並影響成本效率。",
+          "confidence": "policy and capex rule"
+        }
+      ]
+    },
+    {
+      "id": "energy_commodities_supply",
+      "name": "能源 / 原物料 / 物流供應",
+      "importance": "medium",
+      "weight": 3,
+      "keywords": [
+        "oil",
+        "crude",
+        "天然氣",
+        "電價",
+        "power shortage",
+        "copper",
+        "銅",
+        "rare earth",
+        "稀土",
+        "lithium",
+        "shipping",
+        "Red Sea",
+        "strike",
+        "earthquake",
+        "blackout",
+        "物流",
+        "罷工",
+        "地震",
+        "停電"
+      ],
+      "query_terms": [
+        "power shortage semiconductor",
+        "copper prices electronics",
+        "rare earth restrictions",
+        "shipping disruption",
+        "earthquake semiconductor supply chain"
+      ],
+      "impact_rules": [
+        {
+          "direction": "negative",
+          "triggers": [
+            "漲價",
+            "shortage",
+            "disruption",
+            "罷工",
+            "地震",
+            "停電",
+            "物流中斷",
+            "supply disruption"
+          ],
+          "affected_industries": [
+            "半導體製造",
+            "PCB",
+            "電源",
+            "散熱",
+            "電動車",
+            "工業自動化"
+          ],
+          "affected_concepts": [
+            "PCB / ABF 載板",
+            "散熱 / 電源",
+            "機器人 / 自動化",
+            "低軌衛星 / 太空通訊"
+          ],
+          "reason": "能源、金屬與物流中斷會推升成本或限制產能，需驗證公司是否有長約、庫存與轉嫁能力。",
+          "confidence": "cost and supply rule"
+        }
+      ]
+    },
+    {
+      "id": "war_conflict_shipping_energy",
+      "name": "戰爭 / 衝突 / 航運能源風險",
+      "importance": "high",
+      "weight": 5,
+      "keywords": [
+        "war",
+        "conflict",
+        "missile",
+        "drone attack",
+        "air strike",
+        "military drill",
+        "blockade",
+        "Red Sea",
+        "Hormuz",
+        "South China Sea",
+        "Taiwan Strait",
+        "Russia Ukraine",
+        "Israel Iran",
+        "Middle East",
+        "shipping disruption",
+        "cyber attack",
+        "戰爭",
+        "衝突",
+        "飛彈",
+        "無人機攻擊",
+        "空襲",
+        "軍演",
+        "封鎖",
+        "紅海",
+        "荷姆茲海峽",
+        "南海",
+        "台海",
+        "俄烏",
+        "以伊",
+        "中東",
+        "航運中斷",
+        "網攻"
+      ],
+      "query_terms": [
+        "war",
+        "conflict",
+        "Red Sea",
+        "Hormuz",
+        "Taiwan Strait",
+        "South China Sea",
+        "Russia Ukraine",
+        "Israel Iran",
+        "shipping disruption",
+        "cyber attack",
+        "戰爭",
+        "台海",
+        "紅海",
+        "航運中斷"
+      ],
+      "impact_rules": [
+        {
+          "direction": "negative",
+          "triggers": [
+            "escalation",
+            "attack",
+            "missile",
+            "drone attack",
+            "air strike",
+            "blockade",
+            "shipping disruption",
+            "oil spike",
+            "risk-off",
+            "war",
+            "conflict",
+            "升級",
+            "攻擊",
+            "飛彈",
+            "無人機攻擊",
+            "空襲",
+            "封鎖",
+            "航運中斷",
+            "油價飆升",
+            "避險",
+            "戰爭",
+            "衝突"
+          ],
+          "affected_industries": [
+            "半導體製造",
+            "AI伺服器供應鏈",
+            "PCB/ABF",
+            "航運",
+            "能源密集製造",
+            "消費電子"
+          ],
+          "affected_concepts": [
+            "AI 伺服器",
+            "PCB / ABF 載板",
+            "散熱 / 電源",
+            "低軌衛星 / 太空通訊"
+          ],
+          "reason": "戰爭升級會推升避險情緒、能源與航運成本，並增加供應鏈中斷風險；高估值科技股也可能受風險偏好下降影響。",
+          "confidence": "geopolitical transmission rule"
+        },
+        {
+          "direction": "positive",
+          "triggers": [
+            "defense spending",
+            "military order",
+            "cybersecurity demand",
+            "satellite demand",
+            "drone demand",
+            "國防預算",
+            "軍工訂單",
+            "資安需求",
+            "衛星需求",
+            "無人機需求"
+          ],
+          "affected_industries": [
+            "國防航太",
+            "低軌衛星",
+            "資安",
+            "無人機",
+            "軍規通訊"
+          ],
+          "affected_concepts": [
+            "低軌衛星 / 太空通訊",
+            "機器人 / 自動化"
+          ],
+          "reason": "衝突與安全風險可能提高國防、衛星通訊、資安與無人機需求，但仍需確認訂單、政策預算與公司實際曝險。",
+          "confidence": "geopolitical demand rule"
+        }
+      ]
+    }
+  ],
+  "max_age_days": 7,
+  "google_news_when": "7d"
+}
