@@ -107,6 +107,7 @@ class FinMindLoader:
             eps = info.get("trailingEps")
             ry  = info.get("revenueGrowth")
             gm  = info.get("grossMargins")
+            om  = info.get("operatingMargins")
             nm  = info.get("profitMargins")
             roe = info.get("returnOnEquity")
             de  = info.get("debtToEquity")
@@ -121,6 +122,7 @@ class FinMindLoader:
                 "eps":                  _f(eps),
                 "dividend_yield":       _f(dy * 100) if dy and 0 < dy < 0.30 else None,
                 "gross_margin":         _f(gm * 100) if gm else None,
+                "operating_margin":     _f(om * 100) if om else None,
                 "net_margin":           _f(nm * 100) if nm else None,
                 "revenue_yoy":          _f(ry * 100) if ry else None,
                 "roe":                  _f(roe * 100) if roe else None,
@@ -181,7 +183,8 @@ class FinMindLoader:
             "revenue_yoy": None, "revenue_mom": None,
             "latest_revenue_month": None, "eps": None,
             "eps_growth_yoy": None, "gross_margin": None,
-            "net_margin": None, "pe": None, "pb": None,
+            "operating_margin": None, "net_margin": None,
+            "pe": None, "pb": None,
             "dividend_yield": None,
             "data_source": "⚠️ 暫無數據", "data_type": "NO_DATA",
         }
@@ -233,12 +236,21 @@ class FinMindLoader:
                             out["eps"] = round(float(eps_series.iloc[-4:].sum()), 2)  # TTM
                         elif len(eps_series) > 0:
                             out["eps"] = _f(eps_series.iloc[-1])
-                    # 毛利率 / 淨利率：取最新一季
+                    # 三率（毛利 / 營益 / 淨利）：取最新一季
+                    # 注意：FinMind 稅後淨利欄位為 IncomeAfterTaxes（非 NetIncome），
+                    #       營業利益為 OperatingIncome。
                     gp = _f(last.get("GrossProfit"))
                     rv = _f(last.get("Revenue"))
                     if gp is not None and rv:
                         out["gross_margin"] = round(gp / rv * 100, 2)
-                    ni = _f(last.get("NetIncome"))
+                    oi = _f(last.get("OperatingIncome"))
+                    if oi is not None and rv:
+                        out["operating_margin"] = round(oi / rv * 100, 2)
+                    ni = next((v for v in (
+                        _f(last.get("IncomeAfterTaxes")),
+                        _f(last.get("NetIncome")),
+                        _f(last.get("IncomeFromContinuingOperations")),
+                    ) if v is not None), None)
                     if ni is not None and rv:
                         out["net_margin"] = round(ni / rv * 100, 2)
                     # EPS YoY：近四季 TTM vs 前四季 TTM（日期比對，不用位置索引）
@@ -379,8 +391,8 @@ class FinMindLoader:
 
     def get_financial_trend(self, ticker: str, quarters: int = 8) -> List[Dict]:
         """
-        季報趨勢（EPS / 毛利率 / 淨利率），用於個股基本面趨勢圖
-        回傳: [{quarter, eps, gross_margin, net_margin}]
+        季報趨勢（EPS / 毛利率 / 營益率 / 淨利率），用於個股基本面趨勢圖
+        回傳: [{quarter, eps, gross_margin, operating_margin, net_margin}]
         """
         key = f"fin_trend:{ticker}"
         cached = self._hit(key)
@@ -401,18 +413,25 @@ class FinMindLoader:
             for date_idx, row in pv.iterrows():
                 eps = _f(row.get("EPS"))
                 gp  = _f(row.get("GrossProfit"))
-                ni  = _f(row.get("NetIncome"))
+                oi  = _f(row.get("OperatingIncome"))
+                ni  = next((v for v in (
+                    _f(row.get("IncomeAfterTaxes")),
+                    _f(row.get("NetIncome")),
+                    _f(row.get("IncomeFromContinuingOperations")),
+                ) if v is not None), None)
                 rv  = _f(row.get("Revenue"))
                 gm  = round(gp / rv * 100, 2) if gp is not None and rv else None
+                om  = round(oi / rv * 100, 2) if oi is not None and rv else None
                 nm  = round(ni / rv * 100, 2) if ni is not None and rv else None
                 result.append({
-                    "quarter":      str(date_idx)[:7],
-                    "eps":          eps,
-                    "gross_margin": gm,
-                    "net_margin":   nm,
-                    "eps_qoq":      None,
-                    "gm_qoq":       None,
-                    "eps_yoy":      None,  # 去年同季比較
+                    "quarter":          str(date_idx)[:7],
+                    "eps":              eps,
+                    "gross_margin":     gm,
+                    "operating_margin": om,
+                    "net_margin":       nm,
+                    "eps_qoq":          None,
+                    "gm_qoq":           None,
+                    "eps_yoy":          None,  # 去年同季比較
                 })
             # QoQ（季環比）：與前一季比較
             for i in range(1, len(result)):

@@ -168,6 +168,9 @@ def analyze(df: pd.DataFrame, ticker: str = "", name: str = "") -> Dict:
     last_atr       = atr.iloc[-1]
     last_vol       = volume.iloc[-1]
     last_vol_ma    = vol_ma20.iloc[-1]
+    vol_ratio_val  = (round(float(last_vol) / float(last_vol_ma), 2)
+                      if (not np.isnan(last_vol_ma) and last_vol_ma > 0
+                          and not np.isnan(last_vol)) else None)
     last_bias20    = bias20.iloc[-1] if not np.isnan(bias20.iloc[-1]) else None
     last_bias60    = bias60.iloc[-1] if not np.isnan(bias60.iloc[-1]) else None
     last_k         = k_series.iloc[-1]  if not np.isnan(k_series.iloc[-1])  else None
@@ -450,6 +453,7 @@ def analyze(df: pd.DataFrame, ticker: str = "", name: str = "") -> Dict:
             "ma240":         round(last_ma240, 2) if last_ma240 is not None else None,
             "bias20":        round(last_bias20, 2) if last_bias20 is not None else None,
             "bias60":        round(last_bias60, 2) if last_bias60 is not None else None,
+            "vol_ratio":     vol_ratio_val,
             "k_val":         round(last_k, 1) if last_k is not None else None,
             "d_val":         round(last_d, 1) if last_d is not None else None,
             "kd_cross":      (prev_k is not None and prev_d is not None and prev_k < prev_d and last_k is not None and last_d is not None and last_k > last_d),

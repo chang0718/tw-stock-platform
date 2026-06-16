@@ -2,6 +2,7 @@
 
 from typing import Dict, List, Optional
 
+import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -31,23 +32,31 @@ def render_fundamental_block(fund: Dict):
 
     _rev_month = fund.get("latest_revenue_month", "")
     _rev_label = f"營收年增率（{_rev_month}）" if _rev_month else "營收年增率"
+
+    # ── 三率（毛利 / 營益 / 淨利）並列 ──────────────────────────────
+    st.markdown("**📐 三率（最新一季）**")
+    t1, t2, t3 = st.columns(3)
+    _m(t1, "毛利率",       fund.get("gross_margin"),
+       lambda v: f"{v:.1f}%", "扣掉直接成本後還剩多少比例。>30%不錯；>50%護城河強")
+    _m(t2, "營業利益率",   fund.get("operating_margin"),
+       lambda v: f"{v:.1f}%", "本業賺錢效率（毛利再扣管銷研發費用）。反映本業競爭力與費用控管，高值化轉型的關鍵指標。")
+    _m(t3, "淨利率",       fund.get("net_margin"),
+       lambda v: f"{v:.1f}%", "最終賺到的比例（扣掉所有費用與稅）。>10%算不錯")
+
+    # ── 獲利 / 成長 / 估值 ─────────────────────────────────────────
     _m(c1, _rev_label, fund.get("revenue_yoy"),
        lambda v: f"{v:+.1f}%", f"最新月份（{_rev_month}）月營收 vs 去年同月比較。正數=成長，負數=衰退。")
     _m(c2, "EPS（近四季 TTM）", fund.get("eps"),
        lambda v: f"${v:.2f}", "近四季每股盈餘合計（TTM）。越高越好，負數代表虧損。用於計算 PE/公平價。")
-    _m(c3, "本益比 PE",    fund.get("pe"),
-       lambda v: f"{v:.1f}倍", "股價是每年獲利的幾倍。<15倍偏便宜；>30倍偏貴")
-    _m(c4, "毛利率",       fund.get("gross_margin"),
-       lambda v: f"{v:.1f}%", "扣掉直接成本後還剩多少比例。>30%不錯；>50%護城河強")
-
-    c5, c6, c7, c8 = st.columns(4)
-    _m(c5, "EPS年增率（TTM YoY）", fund.get("eps_growth_yoy"),
+    _m(c3, "EPS年增率（TTM YoY）", fund.get("eps_growth_yoy"),
        lambda v: f"{v:+.1f}%", "近四季合計 EPS vs 前四季合計 EPS 的增長率。正值=獲利成長，負值=衰退。")
-    _m(c6, "淨利率",      fund.get("net_margin"),
-       lambda v: f"{v:.1f}%",  "最終賺到的比例（扣掉所有費用後）。>10%算不錯")
-    _m(c7, "股價淨值比",  fund.get("pb"),
+    _m(c4, "本益比 PE",    fund.get("pe"),
+       lambda v: f"{v:.1f}倍", "股價是每年獲利的幾倍。<15倍偏便宜；>30倍偏貴")
+
+    c5, c6 = st.columns(2)
+    _m(c5, "股價淨值比",  fund.get("pb"),
        lambda v: f"{v:.2f}倍", "股價是帳面價值的幾倍。<1倍可能被低估；>3倍偏貴")
-    _m(c8, "現金殖利率",  fund.get("dividend_yield"),
+    _m(c6, "現金殖利率",  fund.get("dividend_yield"),
        lambda v: f"{v:.2f}%",  "每年配股息的比例。>5%適合存股；<2%配息少")
 
     if fund.get("latest_revenue_month"):
@@ -56,6 +65,7 @@ def render_fundamental_block(fund: Dict):
     # ── 白話解讀 ──────────────────────────────────────────────────
     pe  = fund.get("pe")
     gm  = fund.get("gross_margin")
+    om  = fund.get("operating_margin")
     nm  = fund.get("net_margin")
     ry  = fund.get("revenue_yoy")
     dy  = fund.get("dividend_yield")
@@ -77,6 +87,16 @@ def render_fundamental_block(fund: Dict):
             interps.append(f"✅ **毛利率 {gm:.1f}%**：獲利能力不錯")
         else:
             interps.append(f"🟡 **毛利率 {gm:.1f}%**：偏低，屬低毛利行業，需靠量取勝")
+    if om is not None and gm is not None:
+        _gap = gm - om
+        if om >= 15:
+            interps.append(f"✅ **營益率 {om:.1f}%**：本業獲利能力強，費用控管良好")
+        elif om >= 7:
+            interps.append(f"➡️ **營益率 {om:.1f}%**：本業獲利穩健（毛利到營益流失約 {_gap:.1f} 個百分點為營業費用）")
+        elif om > 0:
+            interps.append(f"🟡 **營益率 {om:.1f}%**：本業獲利偏薄，營業費用占比較高，留意費用率變化")
+        else:
+            interps.append(f"🔴 **營益率 {om:.1f}%**：本業虧損，須確認是一次性因素或結構性問題")
     if ry is not None:
         if ry >= 20:
             interps.append(f"🚀 **營收年增 {ry:+.1f}%**：成長強勁，業績明顯擴張")
@@ -242,3 +262,159 @@ def render_health_check_block(fund: dict, fin_trend: Optional[List] = None,
                 st.markdown("**⚖️ 估值**")
                 _show_items(_val_keys)
     st.caption("⚠️ 健檢評分為量化模型參考，不構成投資建議。請結合產業趨勢與個人風險承受度自行判斷。")
+
+
+def render_earnings_summary(fund: Dict, val_pct: Optional[dict] = None):
+    """
+    財報重點摘要（結論摘要式條列）：三率 + EPS(TTM) + 營收動能 + 估值狀態。
+    語氣合規（長期研究導向，不做短線擇時建議）。重用既有 fund 欄位。
+    """
+    if not fund or fund.get("data_type") == "NO_DATA":
+        return
+
+    parts: List[str] = []
+
+    gm, om, nm = fund.get("gross_margin"), fund.get("operating_margin"), fund.get("net_margin")
+    if any(v is not None for v in (gm, om, nm)):
+        rates = []
+        if gm is not None: rates.append(f"毛利 {gm:.1f}%")
+        if om is not None: rates.append(f"營益 {om:.1f}%")
+        if nm is not None: rates.append(f"淨利 {nm:.1f}%")
+        parts.append("**三率（最新季）**：" + "／".join(rates))
+
+    eps = fund.get("eps")
+    egy = fund.get("eps_growth_yoy")
+    if eps is not None:
+        s = f"**EPS（近四季 TTM）**：{eps:.2f} 元"
+        if egy is not None:
+            s += f"（年增 {egy:+.1f}%）"
+        parts.append(s)
+
+    ry = fund.get("revenue_yoy")
+    rmm = fund.get("revenue_mom")
+    rmonth = fund.get("latest_revenue_month", "")
+    if ry is not None:
+        s = f"**月營收動能**：{rmonth + ' ' if rmonth else ''}年增 {ry:+.1f}%"
+        if rmm is not None:
+            s += f"、月增 {rmm:+.1f}%"
+        parts.append(s)
+
+    pe = fund.get("pe")
+    pe_pct = val_pct.get("pe_pct") if val_pct else None
+    if pe_pct is not None:
+        tag = "歷史低估區" if pe_pct < 30 else "歷史偏高區" if pe_pct > 70 else "歷史中性區"
+        head = f"PE {pe:.1f}倍，" if pe is not None else "PE "
+        parts.append(f"**估值**：{head}位於近 3 年 {pe_pct:.0f}% 分位（{tag}）")
+    elif pe is not None:
+        parts.append(f"**估值**：PE {pe:.1f}倍")
+
+    if not parts:
+        return
+
+    st.markdown("##### 🧾 財報重點摘要")
+    for p in parts:
+        st.markdown(f"- {p}")
+    st.caption("⚠️ 以上為已公布財報數據整理，僅供長期研究參考，不構成買賣或擇時建議。")
+
+
+def render_three_rates(fin_trend: Optional[List[Dict]]):
+    """三率（毛利 / 營益 / 淨利）近 8 季趨勢圖。重用 FinMindLoader.get_financial_trend。"""
+    if not fin_trend:
+        st.caption("⚠️ 無季報三率資料（需 FinMind token）")
+        return
+
+    df = pd.DataFrame(fin_trend)
+    st.markdown("##### 📈 三率趨勢（近 8 季）")
+    fig = go.Figure()
+    for col, name, color in [
+        ("gross_margin",     "毛利率", "#1f6feb"),
+        ("operating_margin", "營益率", "#26a69a"),
+        ("net_margin",       "淨利率", "#ff9800"),
+    ]:
+        if col in df.columns and df[col].notna().any():
+            fig.add_scatter(x=df["quarter"], y=df[col], name=name,
+                            mode="lines+markers", line=dict(color=color, width=2))
+    fig.update_layout(
+        height=260, margin=dict(t=10, b=20),
+        yaxis=dict(title="%"), legend=dict(orientation="h", y=-0.25),
+        paper_bgcolor="#0d1117", plot_bgcolor="#161b22",
+        font=dict(color="#8b949e"),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    if len(df) >= 2:
+        last, prev = df.iloc[-1], df.iloc[-2]
+        notes = []
+        for col, name in [("gross_margin", "毛利率"), ("operating_margin", "營益率"), ("net_margin", "淨利率")]:
+            cur, pv = last.get(col), prev.get(col)
+            if pd.notna(cur) and pd.notna(pv):
+                diff = cur - pv
+                arrow = "▲" if diff > 0 else ("▼" if diff < 0 else "→")
+                notes.append(f"{name} {cur:.1f}%（{arrow}{abs(diff):.1f}pt）")
+        if notes:
+            st.caption("最新季 vs 前季： " + " ｜ ".join(notes)
+                       + "　—　三率同步走升代表本業獲利品質改善。")
+
+
+def render_peer_comparison(target_ticker: str, model_df, key_prefix: str = ""):
+    """
+    同業比較表：可切換『供應鏈群組 / 產業別』。target 個股以底色標示。
+    僅使用 model_df 既有欄位（不額外呼叫 API）。
+    """
+    if model_df is None or getattr(model_df, "empty", True):
+        st.caption("⚠️ 無同業比較資料（市場資料未載入）")
+        return
+    if target_ticker not in model_df["ticker"].values:
+        st.caption("⚠️ 此股不在目前市場資料中，無法比較同業")
+        return
+
+    trow = model_df[model_df["ticker"] == target_ticker].iloc[0]
+    mode = st.radio(
+        "同業範圍", ["供應鏈群組", "產業別"],
+        horizontal=True, key=f"peer_mode_{key_prefix}{target_ticker}",
+    )
+    col = "group" if mode == "供應鏈群組" else "industry"
+    val = trow.get(col)
+    if col not in model_df.columns or val is None:
+        st.info("目前資料缺少分類欄位，無法比較同業。")
+        return
+    peers = model_df[model_df[col] == val].copy()
+    if len(peers) < 2:
+        st.info(f"此{mode}（{val}）目前無足夠同業可比較。")
+        return
+
+    want = [
+        ("ticker", "代號"), ("name", "名稱"), ("close", "收盤"),
+        ("change_pct", "漲跌%"), ("pe", "PE"), ("gross_margin", "毛利率%"),
+        ("revenue_yoy", "營收YoY%"), ("risk_score", "風險分"),
+    ]
+    use = [(c, l) for c, l in want if c in peers.columns]
+    disp = peers[[c for c, _ in use]].copy()
+    if "pe" in disp.columns:
+        disp = disp.sort_values("pe", na_position="last")
+    disp = disp.rename(columns=dict(use))
+
+    fmt = {}
+    for c, l in use:
+        if c == "close":            fmt[l] = "{:.1f}"
+        elif c == "change_pct":     fmt[l] = "{:+.2f}%"
+        elif c == "pe":             fmt[l] = "{:.1f}"
+        elif c == "gross_margin":   fmt[l] = "{:.1f}%"
+        elif c == "revenue_yoy":    fmt[l] = "{:+.1f}%"
+        elif c == "risk_score":     fmt[l] = "{:.0f}"
+
+    def _hl(row):
+        is_t = (row.get("代號") == target_ticker)
+        return ['background-color:#1f6feb44;font-weight:700' if is_t else '' for _ in row]
+
+    st.markdown(f"##### 🏭 同業比較（{mode}：{val}）")
+    try:
+        styler = disp.style.apply(_hl, axis=1).format(fmt, na_rep="--")
+        st.dataframe(styler, use_container_width=True, hide_index=True)
+    except Exception:
+        st.dataframe(disp, use_container_width=True, hide_index=True)
+    st.caption(
+        f"共 {len(peers)} 檔同{mode}成員，PE 由低到高排序，藍底為目前個股。"
+        "（營益率/淨利率屬個股深度欄位，批次比較以毛利率代表獲利力。）"
+        "數據僅供研究，不構成投資建議。"
+    )

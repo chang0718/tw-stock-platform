@@ -40,7 +40,10 @@ from config import (
 )
 from utils import format_percentage, read_json, write_json
 from state import initialize_session_state
-from components.fundamental_blocks import render_fundamental_block, render_health_check_block
+from components.fundamental_blocks import (
+    render_fundamental_block, render_health_check_block,
+    render_earnings_summary, render_three_rates, render_peer_comparison,
+)
 from components.news_blocks import render_news_block
 from components.flow_blocks import render_flow_block
 from components.technical_blocks import render_tech_block
@@ -1019,7 +1022,10 @@ def main():
                 st.caption("13F 每季申報一次，有最長 45 天延遲。資料來源：SEC EDGAR（免費）。需安裝：`pip install edgartools`")
                 tracker = InstitutionalTracker()
                 if not tracker.has_edgar:
-                    st.warning(f"⚠️ 未安裝 edgartools，請執行：`{tracker.install_hint()}`")
+                    st.info(
+                        "ℹ️ 這是**選用功能**（SEC 13F 美股機構持股），平台其他功能不受影響。\n\n"
+                        f"若要啟用，請在終端機執行：`{tracker.install_hint()}`，再重新整理頁面。"
+                    )
                 else:
                     fund_choice = st.selectbox("選擇機構", list(TRACKED_FUNDS.keys()),
                                                key="fund_select_tab1")
@@ -1273,8 +1279,15 @@ def main():
                 )
 
                 st.markdown("---")
+                render_earnings_summary(_fund_data, val_pct=_cached_vp)
+
+                st.markdown("---")
                 st.markdown("#### 📊 基本面指標（Yahoo Finance 主力 / FinMind 補月營收）")
                 render_fundamental_block(_fund_data)
+
+                st.markdown("---")
+                st.markdown("#### 🏭 同業比較")
+                render_peer_comparison(selected_ticker, model_df, key_prefix="sa_")
 
                 # ── 月/季趨勢 ──
                 if selected_ticker in st.session_state.stock_fundamentals:
@@ -1325,19 +1338,27 @@ def main():
                             if fin_df["eps"].notna().any():
                                 fig_fin.add_bar(x=fin_df["quarter"], y=fin_df["eps"],
                                                 name="EPS", marker_color="#26a69a", opacity=0.8)
-                            if fin_df["gross_margin"].notna().any():
-                                fig_fin.add_scatter(x=fin_df["quarter"], y=fin_df["gross_margin"],
-                                                    name="毛利率%", yaxis="y2",
-                                                    line=dict(color="purple", width=2))
+                            for _mcol, _mname, _mcolor in [
+                                ("gross_margin",     "毛利率%", "purple"),
+                                ("operating_margin", "營益率%", "#26a69a"),
+                                ("net_margin",       "淨利率%", "orange"),
+                            ]:
+                                if _mcol in fin_df.columns and fin_df[_mcol].notna().any():
+                                    fig_fin.add_scatter(x=fin_df["quarter"], y=fin_df[_mcol],
+                                                        name=_mname, yaxis="y2",
+                                                        line=dict(color=_mcolor, width=2))
                             fig_fin.update_layout(
-                                title="季報 EPS（柱）+ 毛利率（線）",
+                                title="季報 EPS（柱）+ 三率（線）",
                                 yaxis2=dict(overlaying="y", side="right", showgrid=False),
                                 height=300, margin=dict(t=40, b=20),
+                                legend=dict(orientation="h", y=-0.2),
                             )
                             st.plotly_chart(fig_fin, use_container_width=True)
                             # 季報數字表（含 QoQ 季環比 + 同季 YoY）
-                            _fin_cols = ["quarter", "eps", "gross_margin", "net_margin"]
-                            _fin_names = ["季度", "EPS(元)", "毛利率%", "淨利率%"]
+                            _fin_cols = ["quarter", "eps", "gross_margin", "operating_margin", "net_margin"]
+                            _fin_names = ["季度", "EPS(元)", "毛利率%", "營益率%", "淨利率%"]
+                            _fin_cols = [c for c in _fin_cols if c in fin_df.columns]
+                            _fin_names = _fin_names[:len(_fin_cols)]
                             if "eps_qoq" in fin_df.columns:
                                 _fin_cols += ["eps_qoq", "gm_qoq"]
                                 _fin_names += ["EPS季增%", "毛利率季差%pt"]
@@ -1346,11 +1367,12 @@ def main():
                                 _fin_names.append("EPS同季YoY%")
                             tbl_fin = fin_df[_fin_cols].copy()
                             tbl_fin.columns = _fin_names
-                            for col in ["EPS(元)", "毛利率%", "淨利率%"]:
-                                tbl_fin[col] = tbl_fin[col].apply(
-                                    lambda x: f"{x:.2f}" if pd.notna(x) else "--"
-                                )
-                            for col in [c for c in _fin_names if "%" in c and c not in ["毛利率%", "淨利率%"]]:
+                            for col in ["EPS(元)", "毛利率%", "營益率%", "淨利率%"]:
+                                if col in tbl_fin.columns:
+                                    tbl_fin[col] = tbl_fin[col].apply(
+                                        lambda x: f"{x:.2f}" if pd.notna(x) else "--"
+                                    )
+                            for col in [c for c in _fin_names if "%" in c and c not in ["毛利率%", "營益率%", "淨利率%"]]:
                                 tbl_fin[col] = tbl_fin[col].apply(
                                     lambda x: f"{x:+.1f}%" if pd.notna(x) else "--"
                                 )
@@ -1634,6 +1656,16 @@ def main():
                         st.markdown("---")
                         _stop_reason = f"支撐失守（{_pstr(_stop)} 元）" if _stop else "技術破位"
                         st.error(f"🔴 **止損參考**：{_pstr(_stop)} 元  ｜  理由：{_stop_reason}")
+                        # ── 量能狀態（布局時機脈絡，非追價訊號）──
+                        _vr = _analysis.get("vol_ratio")
+                        if _vr is not None:
+                            if _vr >= 1.5:
+                                _vmsg = f"🔊 量能 {_vr:.1f}x 均量（明顯放大）— 分批進出時留意是否為換手放量，避免追在情緒高點"
+                            elif _vr >= 1.0:
+                                _vmsg = f"🔉 量能 {_vr:.1f}x 均量（溫和）— 量價尚屬正常"
+                            else:
+                                _vmsg = f"🔈 量能 {_vr:.1f}x 均量（量縮）— 籌碼沉澱、觀望氣氛，適合分批布局者耐心等待"
+                            st.caption(_vmsg + "　｜　量能僅作布局時機脈絡，非買賣訊號。")
 
             # ── 蒙地卡羅 GBM 20 日股價模擬 ─────────────────────────────
             if _ta_result and _ta_result.get("analysis"):
@@ -2123,11 +2155,24 @@ def main():
                         compact=False,
                     )
                     st.markdown("---")
+                    render_earnings_summary(
+                        _wl_fund, val_pct=st.session_state.get(f"_vp_{selected_wl}")
+                    )
+                    # 三率趨勢（近 8 季，session 快取）
+                    _fin_cache = st.session_state.setdefault("fin_trend_cache", {})
+                    if selected_wl not in _fin_cache:
+                        _fm_fin = FinMindLoader(token=st.session_state.get("finmind_token", ""))
+                        _fin_cache[selected_wl] = _fm_fin.get_financial_trend(selected_wl, quarters=8)
+                    render_three_rates(_fin_cache.get(selected_wl))
+                    st.markdown("---")
                     st.markdown("#### 📊 基本面")
                     if _wl_fund:
                         render_fundamental_block(_wl_fund)
                     else:
                         st.info("⚠️ 尚未載入基本面，請等候自動更新")
+                    st.markdown("---")
+                    st.markdown("#### 🏭 同業比較")
+                    render_peer_comparison(selected_wl, model_df, key_prefix="wl_")
                     st.markdown("---")
                     st.markdown("#### 💰 籌碼")
                     render_flow_block(wl_stock.to_dict())
@@ -2244,6 +2289,16 @@ def main():
                                     for _r in (_wler or ["接近技術壓力區"]): st.caption(f"• {_r}")
                                 st.markdown("---")
                                 st.error(f"🔴 **止損參考**：{_wpstr(_wlst)} 元 ｜ {'支撐失守' if _wlst else '技術破位'}")
+                                # ── 量能狀態（布局時機脈絡，非追價訊號）──
+                                _wlvr = _wla.get("vol_ratio")
+                                if _wlvr is not None:
+                                    if _wlvr >= 1.5:
+                                        _vmsg = f"🔊 量能 {_wlvr:.1f}x 均量（明顯放大）— 分批進出時留意是否為換手放量，避免追在情緒高點"
+                                    elif _wlvr >= 1.0:
+                                        _vmsg = f"🔉 量能 {_wlvr:.1f}x 均量（溫和）— 量價尚屬正常"
+                                    else:
+                                        _vmsg = f"🔈 量能 {_wlvr:.1f}x 均量（量縮）— 籌碼沉澱、觀望氣氛，適合分批布局者耐心等待"
+                                    st.caption(_vmsg + "　｜　量能僅作布局時機脈絡，非買賣訊號。")
 
                         # ── 蒙地卡羅 ────────────────────────────────────
                         if _wl_ta.get("analysis"):

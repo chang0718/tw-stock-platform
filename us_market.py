@@ -480,11 +480,13 @@ class USMarketLoader:
             else:
                 mag = "小幅"
 
-            # 台股預期描述
+            # 台股預期描述（美股收盤影響的是台股「下一個交易日」，非當日；並標註報價日期避免誤導）
+            _qd = s.get("date", "")
+            _qd_label = f"（{_qd[5:].replace('-', '/')} 美股收盤）" if _qd else ""
             if chg > 0:
-                tw_expect = f"台灣 {chain['theme']} 族群今日預計開高，留意量能是否跟進"
+                tw_expect = f"台灣 {chain['theme']} 族群下一個交易日易偏多，留意開盤量能是否跟進"
             else:
-                tw_expect = f"台灣 {chain['theme']} 族群今日可能承壓，觀察是否跌深反彈"
+                tw_expect = f"台灣 {chain['theme']} 族群下一個交易日易承壓，觀察是否跌深反彈"
 
             impacts.append({
                 "type":       "stock",
@@ -494,8 +496,9 @@ class USMarketLoader:
                 "change_pct": chg,
                 "direction":  direction,
                 "magnitude":  mag,
+                "as_of":      _qd,
                 "tw_stocks":  chain["tw_stocks"],
-                "text":       f"**{chain['name']}** {chg:+.1f}% → {mag}{direction}，{tw_expect}",
+                "text":       f"**{chain['name']}** {chg:+.1f}%{_qd_label} → {mag}{direction}，{tw_expect}",
             })
 
         # 費半指數整體提示
