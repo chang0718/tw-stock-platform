@@ -30,6 +30,7 @@ from config import (
     CONCEPT_STOCKS,
     SUPPLY_CHAIN_GROUPS,
     SUPPLY_CHAIN_TREE,
+    MAINSTREAM_ETFS,
     DEFAULT_WEIGHTS,
     DISPLAY_COLUMNS,
     NOTES_FILE,
@@ -38,6 +39,7 @@ from config import (
     WEIGHT_LABELS,
     WEIGHTS_FILE,
 )
+import etf_loader
 from utils import format_percentage, read_json, write_json
 from state import initialize_session_state
 from components.fundamental_blocks import (
@@ -537,50 +539,13 @@ def main():
                 sentiment_data   = sentiment_data,
             )
 
-            # 重算 final_composite（籌碼+技術+基本面三面向加權）
-            pg = filters["preferred_groups"]
-            group_boost_series        = model_df["group"].apply(lambda g: 4.0 if g in pg else 0.0)
-            completeness_bonus_series = model_df["complete_score"].apply(lambda c: 3.0 if c else 0.0)
-            news_adj_series           = model_df["ticker"].apply(
-                lambda t: float(max(-5.0, min(5.0, sentiment_data.get(t, 0) * 5)))
+            # 重算 final_composite（共用計分，確保 App 與每日自動化／紙上交易一致）
+            model_df["final_composite"] = model.compute_final_composite(
+                model_df,
+                preferred_groups = filters["preferred_groups"],
+                sentiment_data   = sentiment_data,
+                fundamental_data = fund_data,
             )
-            # 基本面品質加成（最高 +12）：EPS 成長 + 毛利率 + 營收 YoY + 淨利率
-            # 目的：讓 Top 10 推薦重視獲利品質，而非僅炒議題
-            def _fund_quality_bonus(ticker):
-                fd = fund_data.get(ticker, {})
-                if not fd or fd.get("data_type") == "NO_DATA":
-                    return 0.0
-                bonus = 0.0
-                eyoy = fd.get("eps_growth_yoy")
-                ryoy = fd.get("revenue_yoy")
-                gm   = fd.get("gross_margin")
-                nm   = fd.get("net_margin")
-                if eyoy is not None:
-                    if eyoy > 30: bonus += 4.0
-                    elif eyoy > 15: bonus += 2.5
-                    elif eyoy > 0:  bonus += 1.0
-                if ryoy is not None:
-                    if ryoy > 20: bonus += 3.0
-                    elif ryoy > 5:  bonus += 1.5
-                if gm is not None:
-                    if gm > 40: bonus += 2.5
-                    elif gm > 25: bonus += 1.0
-                if nm is not None and nm > 10:
-                    bonus += 2.5
-                return min(12.0, bonus)
-
-            fund_quality_series = model_df["ticker"].apply(_fund_quality_bonus)
-
-            model_df["final_composite"] = (
-                model_df["prob20"]        * 0.40
-                + model_df["confidence"]  * 0.25
-                + (100 - model_df["risk_score"]) * 0.20
-                + model_df["composite_score"] * 0.15
-                + group_boost_series
-                + completeness_bonus_series
-                + news_adj_series
-                + fund_quality_series      # 基本面品質加成（+0~+12）
-            ).round(2)
 
             st.session_state.model_df_cached = model_df
             st.session_state.model_cache_key = _ck
@@ -3348,7 +3313,7 @@ def main():
                 else:
                     st.info("目前追蹤清單股票中，尚無今年 EPS 進度明顯超越去年的標的（可能資料不足）。")
 
-    def _render_tab_etf():
+    def _render_etf_performance():
         st.subheader("📈 ETF 績效排行")
         st.caption("⚠️ 報酬率為統計性指標，不構成投資建議。ETF 成分股資料來自 yfinance，台灣 ETF 可能資料不足。")
 
@@ -3466,6 +3431,98 @@ def main():
                                     st.caption("⚠️ 台灣 ETF 成分股資料不足（yfinance 未收錄此 ETF 的持股明細）")
                             except Exception:
                                 st.caption("⚠️ 成分股資料載入失敗")
+
+    def _render_etf_holdings():
+        st.subheader("📋 ETF 成分股")
+        st.caption(
+            "台灣 ETF 全成分股無免費 API，故採**匯入發行商持股檔**（各 ETF 產品頁可下載 CSV）。"
+            "匯入後顯示成分與權重、與你的持股/追蹤重疊，並存成帶日期快照（日後可比對變化）。僅供研究。"
+        )
+
+        # 選 ETF（依分類）
+        _cat = st.selectbox("分類", list(MAINSTREAM_ETFS.keys()), key="etf_h_cat")
+        _codes = MAINSTREAM_ETFS.get(_cat, [])
+
+        def _etf_label(t):
+            if not model_df.empty:
+                _r = model_df[model_df["ticker"] == t]
+                if not _r.empty and _r.iloc[0].get("name"):
+                    return f"{t}　{_r.iloc[0]['name']}"
+            return t
+
+        sel = st.selectbox("ETF", _codes, format_func=_etf_label, key="etf_h_sel")
+
+        # 匯入 CSV
+        up = st.file_uploader(
+            f"匯入 {sel} 持股 CSV（從發行商產品頁下載）", type=["csv"], key=f"etf_up_{sel}"
+        )
+        if up is not None:
+            parsed = etf_loader.parse_holdings_csv(up)
+            if parsed:
+                d = etf_loader.save_snapshot(sel, parsed)
+                st.success(f"✅ 已匯入並儲存快照：{sel}　{d}　共 {len(parsed)} 檔成分股")
+            else:
+                st.error("❌ 無法辨識此 CSV 的代號/名稱/權重欄位。請確認是發行商「持股明細」檔（含成分股代號與權重）。")
+
+        # 載入最新快照
+        snap = etf_loader.load_latest(sel)
+        if not snap or not snap.get("holdings"):
+            st.info(f"ℹ️ {sel} 尚無成分股資料。請於上方匯入發行商持股 CSV。")
+            return
+
+        holdings = snap["holdings"]
+        _snaps = etf_loader.list_snapshots(sel)
+        st.markdown(f"**{_etf_label(sel)}**　｜　快照日期：**{snap.get('date','?')}**"
+                    f"　｜　成分股 {len(holdings)} 檔　｜　已存快照 {len(_snaps)} 份")
+
+        # 與持股/追蹤重疊
+        _wl = set(st.session_state.get("watchlist", {}).keys())
+        _port = st.session_state.get("portfolio")
+        _pf = set(_port._holdings.keys()) if (_port is not None and hasattr(_port, "_holdings")) else set()
+        _mine = _wl | _pf
+        _ov = etf_loader.overlap_with(holdings, _mine)
+        if _mine:
+            _ov_w = sum((h.get("weight") or 0) for h in holdings if h.get("ticker") in _ov)
+            if _ov:
+                st.warning(
+                    f"🔎 此 ETF 有 **{len(_ov)} 檔**與你的持股/追蹤重疊"
+                    f"（合計約占權重 **{_ov_w:.1f}%**）：{', '.join(sorted(_ov))}　"
+                    "—— 注意整體部位的集中度風險。"
+                )
+            else:
+                st.caption("與你的持股/追蹤無重疊。")
+
+        # 成分股表（依權重排序，重疊者標示）
+        rows = []
+        for i, h in enumerate(holdings, 1):
+            t = h.get("ticker", "")
+            rows.append({
+                "排名": i,
+                "代號": t,
+                "名稱": h.get("name", ""),
+                "權重%": f"{h['weight']:.2f}" if h.get("weight") is not None else "--",
+                "我的": "⭐" if t in _ov else "",
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True, height=420)
+
+        # 跳轉個股分析（沿用既有 goto_ticker 預選機制）
+        _opts = ["（請選擇）"] + [h.get("ticker", "") for h in holdings if h.get("ticker")]
+        _jump = st.selectbox(
+            "選成分股跳轉個股分析", _opts,
+            format_func=lambda t: t if t == "（請選擇）" else _etf_label(t),
+            key=f"etf_jump_{sel}",
+        )
+        if _jump != "（請選擇）":
+            if st.button(f"🔍 前往 {_jump} 個股分析", key=f"etf_jump_btn_{sel}"):
+                st.session_state["goto_ticker"] = _jump
+                st.info(f"請切換到「🔍 個股研究」Tab，已預選 {_jump}")
+
+    def _render_tab_etf():
+        _etf_subtabs = st.tabs(["🏆 績效排行", "📋 成分股"])
+        with _etf_subtabs[0]:
+            _render_etf_performance()
+        with _etf_subtabs[1]:
+            _render_etf_holdings()
 
 
     # ============================================================

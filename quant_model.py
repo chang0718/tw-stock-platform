@@ -575,6 +575,74 @@ class QuantModel:
         result["final_composite"] = (base_fc + group_boost + completeness_bonus + news_adj).round(2)
         return result
 
+    @staticmethod
+    def compute_final_composite(
+        model_df: pd.DataFrame,
+        preferred_groups: List[str] = None,
+        sentiment_data: Dict = None,
+        fundamental_data: Dict = None,
+    ) -> pd.Series:
+        """
+        帶加成的最終綜合分數（App 與每日自動化／紙上交易共用，確保排名一致）。
+
+        = 40%×prob20 + 25%×confidence + 20%×(100−risk_score) + 15%×composite_score
+          + 偏好產業 +4 + 數據完整度 +3 + 新聞情緒 ±5 + 基本面品質 +0~12
+
+        注意：本式與 enrich_dataframe 內的 base final_composite 不同（多了基本面品質
+        加成、權重亦不同）；App 顯示與每日報告／紙上交易一律以本式為準。
+        """
+        preferred_groups = preferred_groups or []
+        sentiment_data   = sentiment_data   or {}
+        fundamental_data = fundamental_data or {}
+
+        group_boost = model_df["group"].apply(
+            lambda g: 4.0 if g in preferred_groups else 0.0
+        )
+        completeness_bonus = model_df["complete_score"].apply(
+            lambda c: 3.0 if c else 0.0
+        )
+        # 新聞情緒（−5~+5）：sentiment_data 僅含有效分數，無資料給 0（不影響排名）
+        news_adj = model_df["ticker"].apply(
+            lambda t: float(max(-5.0, min(5.0, sentiment_data.get(t, 0) * 5)))
+        )
+
+        # 基本面品質加成（最高 +12）：讓推薦重視獲利品質，而非僅炒議題
+        def _fund_quality_bonus(ticker):
+            fd = fundamental_data.get(ticker, {})
+            if not fd or fd.get("data_type") == "NO_DATA":
+                return 0.0
+            bonus = 0.0
+            eyoy = fd.get("eps_growth_yoy")
+            ryoy = fd.get("revenue_yoy")
+            gm   = fd.get("gross_margin")
+            nm   = fd.get("net_margin")
+            if eyoy is not None:
+                if eyoy > 30: bonus += 4.0
+                elif eyoy > 15: bonus += 2.5
+                elif eyoy > 0:  bonus += 1.0
+            if ryoy is not None:
+                if ryoy > 20: bonus += 3.0
+                elif ryoy > 5:  bonus += 1.5
+            if gm is not None:
+                if gm > 40: bonus += 2.5
+                elif gm > 25: bonus += 1.0
+            if nm is not None and nm > 10:
+                bonus += 2.5
+            return min(12.0, bonus)
+
+        fund_quality = model_df["ticker"].apply(_fund_quality_bonus)
+
+        return (
+            model_df["prob20"]        * 0.40
+            + model_df["confidence"]  * 0.25
+            + (100 - model_df["risk_score"]) * 0.20
+            + model_df["composite_score"] * 0.15
+            + group_boost
+            + completeness_bonus
+            + news_adj
+            + fund_quality
+        ).round(2)
+
     def find_catchup_candidates(
         self, df: pd.DataFrame, top_n: int = 10
     ) -> pd.DataFrame:
