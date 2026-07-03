@@ -6,6 +6,9 @@ on:
     - cron: '30 6 * * 1-5'
   workflow_dispatch:  # 允許手動觸發測試
 
+permissions:
+  contents: write  # 紙上交易帳本需 commit 回存 repo
+
 jobs:
   daily-report:
     runs-on: ubuntu-latest
@@ -30,9 +33,26 @@ jobs:
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
 
+      - name: Run paper trading（每日虛擬買賣，維持 5 檔輪動）
+        run: python scripts/paper_trading_daily.py
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+
       - name: Send daily report
         env:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           REPORT_TO: ${{ secrets.GMAIL_USER }}
         run: python scripts/daily_report.py
+
+      - name: Commit 紙上交易帳本回存 repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/paper_trading/ledger.json
+          if git diff --cached --quiet; then
+            echo "帳本無變更，跳過 commit"
+          else
+            git commit -m "chore: 紙上交易每日更新 [skip ci]"
+            git push
+          fi

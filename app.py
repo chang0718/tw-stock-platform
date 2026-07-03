@@ -40,6 +40,7 @@ from config import (
     WEIGHTS_FILE,
 )
 import etf_loader
+import paper_trading
 from utils import format_percentage, read_json, write_json
 from state import initialize_session_state
 from components.fundamental_blocks import (
@@ -3524,6 +3525,118 @@ def main():
         with _etf_subtabs[1]:
             _render_etf_holdings()
 
+    def _render_paper_trading():
+        st.subheader("📊 紙上交易 — 每日虛擬買賣，長期檢驗模型選股能力")
+        st.caption(
+            "每交易日盤後由 GitHub Actions 自動執行並回存帳本；以下為長期累積結果。"
+            "歷史回測不代表未來報酬，僅供策略穩定性與風險特徵參考，非投資建議。"
+        )
+
+        # ── 運作邏輯（視覺化說明）──────────────────────────────────────
+        with st.expander("🧠 運作邏輯說明（核心思考方法）", expanded=False):
+            st.graphviz_chart(
+                'digraph G { rankdir=TB; bgcolor="transparent"; '
+                'node [shape=box, style="rounded,filled", fillcolor="#1e293b", '
+                'fontcolor="white", fontname="Microsoft JhengHei", fontsize=11]; '
+                'edge [color="#64748b"]; '
+                'A [label="每日盤後\\n載入全市場行情"]; '
+                'B [label="計算綜合分數\\n(與 App 同一套 compute_final_composite)"]; '
+                'C [label="排序取『合格前 5 名』"]; '
+                'D [label="維持 5 檔持倉\\n掉出榜外／利空·風險 guard → 賣出\\n新上榜 → 等權買進(扣手續費·稅·滑價)"]; '
+                'E [label="結算當日 NAV\\n與基準 0050 比較"]; '
+                'F [label="記錄帳本 ledger.json\\ncommit 回存 repo（長期累積）"]; '
+                'G [label="權益曲線 + Sharpe/MDD/勝率/Alpha/IC\\n→ 評估模型、迭代優化"]; '
+                'A->B->C->D->E->F->G; }',
+                use_container_width=True,
+            )
+            st.markdown(
+                "**綜合分數** = 40%×20日上漲機率 + 25%×信心 + 20%×(100−風險) "
+                "+ 15%×六因子分 + 新聞情緒±5 + 基本面品質+0~12 + 偏好產業+4 + 完整度+3\n\n"
+                "**為什麼這樣設計**：用同一套分數驅動，確保 App 看到的排名＝實際下單依據；"
+                "固定 5 檔、每日輪動，先檢驗「模型挑的股票長期是否真的贏大盤」，再放寬金額與檔數。\n\n"
+                "**評估指標（對照財金學界實務）**：\n"
+                "- 累積／年化報酬：整體賺賠\n"
+                "- **Alpha (vs 0050)**：扣掉大盤後的超額報酬（有沒有選股價值）\n"
+                "- **Sharpe**：每承受一單位波動換得的報酬（風險調整後績效）\n"
+                "- **最大回撤 MDD**：最慘從高點跌多少（下檔風險）\n"
+                "- 勝率：已平倉交易賺錢比例\n"
+                "- **IC 資訊係數**：進場分數與實現報酬的等級相關（Grinold & Kahn 衡量選股技術的標準量）"
+            )
+
+        eng = paper_trading.PaperTradingEngine.load()
+        navs = eng.ledger.get("daily_nav", [])
+        if not navs:
+            st.info(
+                "尚無交易紀錄。每日盤後排程（GitHub Actions）首次執行後，這裡會出現權益曲線與指標。"
+                "你也可本機執行 `python scripts/paper_trading_daily.py` 產生第一筆。"
+            )
+            return
+
+        m = eng.equity_metrics()
+        cfg = eng.ledger.get("config", {})
+
+        # ── 指標卡 ────────────────────────────────────────────────────
+        def _fmt(v, suffix=""):
+            return f"{v}{suffix}" if v is not None else "—"
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("累積報酬", _fmt(m["cum_return_pct"], "%"),
+                  _fmt(m["alpha_pct"], "% Alpha") if m["alpha_pct"] is not None else None)
+        c2.metric("年化報酬", _fmt(m["annual_return_pct"], "%"))
+        c3.metric("Sharpe", _fmt(m["sharpe"]))
+        c4.metric("最大回撤", _fmt(m["max_drawdown_pct"], "%"))
+        c5, c6, c7, c8 = st.columns(4)
+        c5.metric("勝率", _fmt(m["win_rate_pct"], "%"), help=f"已平倉 {m['n_closed']} 筆")
+        c6.metric("IC 資訊係數", _fmt(m["ic"]), help="進場分數 vs 實現報酬 Spearman 相關，需 ≥5 筆已平倉")
+        c7.metric("追蹤天數", m["days"])
+        c8.metric("目前持倉", len(eng.ledger.get("positions", {})))
+
+        # ── 權益曲線 vs 基準 ──────────────────────────────────────────
+        dates = [r["date"] for r in navs]
+        strat = [r.get("cum_return_pct") for r in navs]
+        bench = [r.get("bench_return_pct") for r in navs]
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=dates, y=strat, name="策略", mode="lines",
+                                 line=dict(color="#22c55e", width=2)))
+        if any(b is not None for b in bench):
+            fig.add_trace(go.Scatter(x=dates, y=bench, name="0050 基準", mode="lines",
+                                     line=dict(color="#94a3b8", dash="dash")))
+        fig.update_layout(title="權益曲線（累積報酬 %）", yaxis_title="累積報酬 %",
+                          height=360, margin=dict(l=10, r=10, t=40, b=10),
+                          legend=dict(orientation="h"))
+        st.plotly_chart(fig, use_container_width=True)
+
+        # ── 目前持倉 ──────────────────────────────────────────────────
+        positions = eng.ledger.get("positions", {})
+        if positions:
+            st.markdown(f"**目前持倉（維持 {cfg.get('max_positions', 5)} 檔）**")
+            prows = []
+            for t, p in positions.items():
+                cost = p.get("cost_basis") or 0
+                last = p.get("last_price") or cost
+                pnl = (last / cost - 1) * 100 if cost else 0
+                prows.append({
+                    "代號": t, "名稱": p.get("name"), "股數": p.get("shares"),
+                    "成本": round(cost, 2), "現價": round(last, 2),
+                    "未實現%": round(pnl, 2), "進場日": p.get("buy_date"),
+                    "進場分數": p.get("entry_score"),
+                })
+            st.dataframe(pd.DataFrame(prows), use_container_width=True, hide_index=True)
+
+        # ── 近期交易紀錄 ──────────────────────────────────────────────
+        trades = eng.ledger.get("trades", [])
+        if trades:
+            st.markdown("**近期交易紀錄（最新 20 筆）**")
+            recent = trades[-20:][::-1]
+            cols = ["date", "action", "ticker", "name", "price", "shares", "reason", "ret_pct"]
+            st.dataframe(pd.DataFrame(recent)[cols], use_container_width=True, hide_index=True)
+
+        st.caption(
+            f"資金上限 NT${cfg.get('initial_budget', 0):,}｜成本：手續費 {cfg.get('fee_bps')}bps "
+            f"+ 賣出證交稅 {cfg.get('tax_bps')}bps + 滑價 {cfg.get('slippage_bps')}bps。"
+            "本頁為研究與風險評估用途，歷史回測不代表未來報酬。"
+        )
+
 
     # ============================================================
     # 5-Tab 主導覽（情勢雷達 → 主題供應鏈 → 候選篩選 → 個股研究 → 追蹤與組合）
@@ -3557,7 +3670,7 @@ def main():
             _render_tab_industry()
 
     with tabs[4]:
-        _wt = st.tabs(["⭐ 追蹤清單", "💼 持倉管理", "📈 ETF 排行", "⚙️ 模型設定"])
+        _wt = st.tabs(["⭐ 追蹤清單", "💼 持倉管理", "📈 ETF 排行", "📊 紙上交易", "⚙️ 模型設定"])
         with _wt[0]:
             _render_tab_watchlist()
         with _wt[1]:
@@ -3565,6 +3678,8 @@ def main():
         with _wt[2]:
             _render_tab_etf()
         with _wt[3]:
+            _render_paper_trading()
+        with _wt[4]:
             _render_tab_settings()
 
 
