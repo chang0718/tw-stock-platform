@@ -39,7 +39,12 @@ DEFAULT_CONFIG = {
     "slippage_bps": 10.0,         # 滑價假設 0.1%（買賣皆計）
     "risk_guard": 80.0,           # risk_score 超過即視為利空 → 賣出
     "news_guard": -0.5,           # 新聞情緒分數（-1~1）低於即視為利空 → 賣出
-    "min_volume_lots": 0,         # 流動性門檻（張）；0 = 不過濾（資料無量時不誤殺）
+    # ── 選股池合格門檻（四層過濾，避免抓到零量微型股）──────────────────
+    # 各層皆「有欄位才套用」；設 0 / False / [] 即關閉該層過濾。
+    "min_volume_lots": 500,       # 流動性門檻（張/日）；0 = 不過濾（資料無量時不誤殺）
+    "min_market_cap": 1e10,       # 市值門檻（NT$，1e10 = 100 億）；0 = 不過濾（無 market_cap 欄時自動略過）
+    "require_real_fund": True,    # 是否要求有真實基本面（has_real_fund==True）；False = 允許純技術面股票
+    "candidate_levels": ["核心候選", "觀察候選"],  # 只買這些候選等級；空 [] = 不依候選等級過濾
 }
 
 
@@ -138,13 +143,43 @@ class PaperTradingEngine:
             senti[t] = None if sv is None or (isinstance(sv, float) and math.isnan(sv)) else float(sv)
             names[t] = str(r.get("name") or t)
 
-        # 合格池：有正價格、（可選）量能達標
-        elig = df[df["close"].astype(float) > 0].copy()
-        if cfg.get("min_volume_lots", 0) and "volume" in elig.columns:
-            elig = elig[pd.to_numeric(elig["volume"], errors="coerce").fillna(0) >= cfg["min_volume_lots"]]
-        elig = elig.sort_values("final_composite", ascending=False)
+        # ── 合格池：分層過濾（liquidity → 市值 → 真實基本面 → 候選等級）──────
+        # 每層皆「有欄位才套用」，minimal dataframe 不會 crash。
+        # 過濾後若不足 N 檔 → 逆序逐層放寬（先放候選等級，再基本面、市值、量能），
+        # 直到湊滿 N 檔或所有層皆放寬，避免「無合格標的」；並記錄放寬原因。
+        base = df[df["close"].astype(float) > 0].copy()
+
+        def _apply_layers(active: set) -> pd.DataFrame:
+            """依 active 集合套用各過濾層，回傳過濾後的合格池。"""
+            e = base
+            if "volume" in active and cfg.get("min_volume_lots", 0) and "volume" in e.columns:
+                e = e[pd.to_numeric(e["volume"], errors="coerce").fillna(0) >= cfg["min_volume_lots"]]
+            if "market_cap" in active and cfg.get("min_market_cap", 0) and "market_cap" in e.columns:
+                e = e[pd.to_numeric(e["market_cap"], errors="coerce").fillna(0) >= cfg["min_market_cap"]]
+            if "has_real_fund" in active and cfg.get("require_real_fund") and "has_real_fund" in e.columns:
+                e = e[e["has_real_fund"] == True]  # noqa: E712（保留欄位語意，允許 NaN 被濾除）
+            if "candidate_level" in active and cfg.get("candidate_levels") and "candidate_level" in e.columns:
+                e = e[e["candidate_level"].isin(cfg["candidate_levels"])]
+            return e
+
+        # 放寬順序（逆序：最後套用的最先被放寬）
+        relax_order = ["candidate_level", "has_real_fund", "market_cap", "volume"]
+        active_layers = set(relax_order)
+        relaxed: List[str] = []  # 記錄本日實際放寬的層（供稽核/log）
+
+        elig = _apply_layers(active_layers)
+        while len(elig) < n and relax_order:
+            dropped = relax_order.pop(0)
+            active_layers.discard(dropped)
+            relaxed.append(dropped)
+            elig = _apply_layers(active_layers)
+
+        elig = elig.copy().sort_values("final_composite", ascending=False)
         target = [str(t) for t in elig["ticker"].head(n).tolist()]
         target_set = set(target)
+
+        if relaxed:
+            print(f"[PAPER] {date} 合格池不足 {n} 檔，放寬過濾層：{relaxed}（剩 {len(elig)} 檔候選）")
 
         trades: List[Dict] = []
 
@@ -231,6 +266,7 @@ class PaperTradingEngine:
             "benchmark_close": benchmark_close,
             "cum_return_pct": round(cum_return_pct, 2),
             "bench_return_pct": round(bench_return_pct, 2) if bench_return_pct is not None else None,
+            "relaxed": relaxed,  # 本日被放寬的過濾層（空 = 四層皆滿足；供稽核選股池品質）
         }
         # 同日覆寫（force 情境）
         self.ledger["daily_nav"] = [d for d in navs if d.get("date") != date] + [rec]

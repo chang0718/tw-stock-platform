@@ -97,6 +97,116 @@ def test_metrics_and_alpha():
     assert m["alpha_pct"] > 0
 
 
+def _mk_gate_df(rows):
+    """建構含四層過濾欄位（volume/market_cap/has_real_fund/candidate_level）的合成 df。
+    rows: [{ticker, final_composite, volume?, market_cap?, has_real_fund?, candidate_level?}]
+    未指定的欄位用「可通過門檻」的預設值。"""
+    out = []
+    for r in rows:
+        out.append({
+            "ticker": r["ticker"], "name": f"股{r['ticker']}", "close": r.get("close", 100.0),
+            "final_composite": r["final_composite"], "risk_score": r.get("risk_score", 30.0),
+            "sentiment_score": None,
+            "volume": r.get("volume", 5000),
+            "market_cap": r.get("market_cap", 5e10),
+            "has_real_fund": r.get("has_real_fund", True),
+            "candidate_level": r.get("candidate_level", "核心候選"),
+        })
+    return pd.DataFrame(out)
+
+
+def test_low_volume_filtered():
+    """min_volume_lots=500 時，量能不足的股票被濾除，不進選股池。"""
+    eng = PaperTradingEngine(config={"max_positions": 2, "min_volume_lots": 500})
+    df = _mk_gate_df([
+        {"ticker": "HI", "final_composite": 95, "volume": 3000},   # 高量
+        {"ticker": "MID", "final_composite": 90, "volume": 800},   # 達標
+        {"ticker": "LOW", "final_composite": 99, "volume": 50},    # 低量（分數最高但應被濾）
+    ])
+    eng.run_day(df, date="2026-01-01", benchmark_close=50.0)
+    assert "LOW" not in eng.ledger["positions"]
+    assert set(eng.ledger["positions"]) == {"HI", "MID"}
+
+
+def test_no_fundamental_filtered():
+    """require_real_fund=True 時，無真實基本面的股票被濾除。"""
+    eng = PaperTradingEngine(config={"max_positions": 2, "require_real_fund": True})
+    df = _mk_gate_df([
+        {"ticker": "A", "final_composite": 90, "has_real_fund": True},
+        {"ticker": "B", "final_composite": 85, "has_real_fund": True},
+        {"ticker": "NF", "final_composite": 99, "has_real_fund": False},  # 無基本面（最高分但應被濾）
+    ])
+    eng.run_day(df, date="2026-01-01", benchmark_close=50.0)
+    assert "NF" not in eng.ledger["positions"]
+    assert set(eng.ledger["positions"]) == {"A", "B"}
+
+
+def test_candidate_level_filtered():
+    """candidate_levels 設定時，非核心/觀察候選（如高風險觀察）被濾除。"""
+    eng = PaperTradingEngine(config={
+        "max_positions": 2,
+        "candidate_levels": ["核心候選", "觀察候選"],
+    })
+    df = _mk_gate_df([
+        {"ticker": "A", "final_composite": 90, "candidate_level": "核心候選"},
+        {"ticker": "B", "final_composite": 85, "candidate_level": "觀察候選"},
+        {"ticker": "HR", "final_composite": 99, "candidate_level": "高風險觀察"},  # 應被濾
+    ])
+    eng.run_day(df, date="2026-01-01", benchmark_close=50.0)
+    assert "HR" not in eng.ledger["positions"]
+    assert set(eng.ledger["positions"]) == {"A", "B"}
+
+
+def test_market_cap_filtered():
+    """min_market_cap 設定時，市值不足的小型股被濾除。"""
+    eng = PaperTradingEngine(config={"max_positions": 2, "min_market_cap": 1e10})
+    df = _mk_gate_df([
+        {"ticker": "BIG1", "final_composite": 90, "market_cap": 5e10},
+        {"ticker": "BIG2", "final_composite": 85, "market_cap": 2e10},
+        {"ticker": "SMALL", "final_composite": 99, "market_cap": 1e9},  # 10 億（最高分但應被濾）
+    ])
+    eng.run_day(df, date="2026-01-01", benchmark_close=50.0)
+    assert "SMALL" not in eng.ledger["positions"]
+    assert set(eng.ledger["positions"]) == {"BIG1", "BIG2"}
+
+
+def test_relaxation_fills_n_and_records_reasons():
+    """合格池不足 N 檔時，逐層放寬直到湊滿 N，且記錄放寬原因於 rec['relaxed']。"""
+    eng = PaperTradingEngine(config={
+        "max_positions": 3,
+        "min_volume_lots": 500,
+        "min_market_cap": 1e10,
+        "require_real_fund": True,
+        "candidate_levels": ["核心候選"],
+    })
+    # 只有 1 檔完全合格；其餘各缺一項門檻 → 需放寬才能湊滿 3 檔
+    df = _mk_gate_df([
+        {"ticker": "FULL", "final_composite": 95},  # 全部通過
+        {"ticker": "NOFUND", "final_composite": 90, "has_real_fund": False},   # 缺基本面
+        {"ticker": "WATCH", "final_composite": 88, "candidate_level": "觀察候選"},  # 非核心候選
+        {"ticker": "SMALL", "final_composite": 80, "market_cap": 5e8},  # 市值太小
+    ])
+    rec = eng.run_day(df, date="2026-01-01", benchmark_close=50.0)
+    # 放寬機制應仍湊滿 3 檔
+    assert rec["n_pos"] == 3
+    assert len(eng.ledger["positions"]) == 3
+    # 應記錄放寬層；逆序：先放 candidate_level，再 has_real_fund...
+    assert rec["relaxed"], "應記錄至少一個放寬層"
+    assert rec["relaxed"][0] == "candidate_level"
+
+
+def test_no_relaxation_when_enough():
+    """四層皆滿足且候選足夠時，不應放寬任何層（relaxed 為空）。"""
+    eng = PaperTradingEngine(config={"max_positions": 2, "min_volume_lots": 500})
+    df = _mk_gate_df([
+        {"ticker": "A", "final_composite": 90},
+        {"ticker": "B", "final_composite": 85},
+        {"ticker": "C", "final_composite": 80},
+    ])
+    rec = eng.run_day(df, date="2026-01-01", benchmark_close=50.0)
+    assert rec["relaxed"] == []
+
+
 def test_roundtrip_serialization():
     eng = PaperTradingEngine(config={"max_positions": 2})
     eng.run_day(_mk_df({"A": 90, "B": 80}, price=100.0), date="2026-01-01", benchmark_close=50.0)

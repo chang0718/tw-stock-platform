@@ -11,10 +11,13 @@ GitHub Actions 用：每日盤後執行紙上交易一日，並把帳本寫入 d
 - 不使用未來資料：僅以當日盤後分數決策，下一交易日才結算
 - 任一外部資料失敗皆 best-effort 降級，不中斷每日記帳
 """
+import os
 import sys
 import types
 from datetime import datetime
 from pathlib import Path
+
+import pandas as pd
 
 # ── 在 import 任何專案模組前，注入 fake streamlit（CI 無 streamlit）──────────
 def _safe_log(*a, **k):
@@ -36,7 +39,45 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import DEFAULT_WEIGHTS                 # noqa: E402
 from data_loader import MarketDataLoader           # noqa: E402
 from quant_model import QuantModel                 # noqa: E402
-from paper_trading import PaperTradingEngine, LEDGER_FILE  # noqa: E402
+from paper_trading import PaperTradingEngine, LEDGER_FILE, DEFAULT_CONFIG  # noqa: E402
+from finmind_loader import FinMindLoader           # noqa: E402
+
+# 精簡 liquid universe 上限（僅對此子集抓基本面，控管 FinMind API 呼叫量／逾時風險）
+LIQUID_UNIVERSE_SIZE = 200
+
+
+def load_fundamentals_for_universe(df):
+    """
+    對「已預篩的精簡 liquid universe」逐檔載入 FinMind/Yahoo 基本面。
+
+    回傳 (fundamental_data, market_cap_map, n_real)：
+      - fundamental_data：{ticker: fundamental dict}，供 compute_final_composite 的品質加成
+      - market_cap_map  ：{ticker: market_cap}，附回 model_df 供 B2 市值層過濾
+      - n_real          ：實際取得真實基本面的檔數（供 log）
+
+    無 token 時 FinMind 額度受限、多數會降級為 NO_DATA，屬預期行為（B2 的
+    require_real_fund 層會自動放寬並記錄），本函式仍完成、不中斷每日記帳。
+    """
+    token = os.environ.get("FINMIND_TOKEN", "")
+    fm = FinMindLoader(token=token)
+    fundamental_data = {}
+    market_cap_map = {}
+    n_real = 0
+    for t in df["ticker"].astype(str).tolist():
+        try:
+            fd = fm.get_fundamental(t)  # 沿用 App 相同介面（yfinance 主力 + FinMind 月營收）
+        except Exception as e:
+            print(f"[WARN] {t} 基本面載入失敗：{e}")
+            continue
+        if not fd:
+            continue
+        fundamental_data[t] = fd
+        mc = fd.get("market_cap")
+        if mc is not None:
+            market_cap_map[t] = mc
+        if fd.get("data_type") == "REAL":
+            n_real += 1
+    return fundamental_data, market_cap_map, n_real
 
 
 def fetch_benchmark_close(symbols=("0050.TW", "^TWII")):
@@ -70,16 +111,45 @@ def main():
         print("[ERR] 市場資料載入失敗，跳過")
         sys.exit(1)
 
-    print(f"[INFO] 載入 {len(df)} 檔，計算量化模型...")
+    # ── 預篩 liquid universe：先用成交量（張）挑出最有量的前 N 檔，只對此子集抓基本面 ──
+    # 目的：把 FinMind/Yahoo API 呼叫量壓在 ~200 檔內，避免全市場逐檔（成本/逾時），
+    # 同時確保紙上交易選股池的基本面資料來自有流動性的標的。
+    min_lots = DEFAULT_CONFIG.get("min_volume_lots", 0)
+    liquid = df.copy()
+    if "volume" in liquid.columns:
+        liquid["_vol_num"] = pd.to_numeric(liquid["volume"], errors="coerce").fillna(0)
+        if min_lots:
+            liquid = liquid[liquid["_vol_num"] >= min_lots]
+        liquid = liquid.sort_values("_vol_num", ascending=False).head(LIQUID_UNIVERSE_SIZE)
+        liquid = liquid.drop(columns=["_vol_num"])
+    else:
+        liquid = liquid.head(LIQUID_UNIVERSE_SIZE)
+    print(f"[INFO] 預篩 liquid universe：{len(liquid)} 檔（volume>={min_lots}張，上限 {LIQUID_UNIVERSE_SIZE}）")
+
+    # ── 對精簡池載入基本面（best-effort；無 token 時多數降級，B2 會自動放寬）──
+    print("[INFO] 載入精簡池基本面（FinMind/Yahoo）...")
+    try:
+        fundamental_data, market_cap_map, n_real = load_fundamentals_for_universe(liquid)
+    except Exception as e:
+        print(f"[WARN] 基本面批次載入異常，改用純技術面：{e}")
+        fundamental_data, market_cap_map, n_real = {}, {}, 0
+    print(f"[INFO] 取得真實基本面 {n_real}/{len(liquid)} 檔（market_cap {len(market_cap_map)} 檔）")
+
+    print(f"[INFO] 對 {len(liquid)} 檔計算量化模型...")
     model = QuantModel(weights=DEFAULT_WEIGHTS)
-    model_df = model.enrich_dataframe(df, preferred_groups=[])
+    model_df = model.enrich_dataframe(
+        liquid, preferred_groups=[], fundamental_data=fundamental_data
+    )
     if model_df is None or model_df.empty:
         print("[ERR] 模型結果為空")
         sys.exit(1)
 
-    # 與 App 共用計分（headless 無逐檔基本面/新聞 → 用模型核心分；overlay 為 v2）
+    # 附回 market_cap 欄位，供 paper_trading 的市值過濾層使用（無資料者為 NaN，自動被濾/放寬）
+    model_df["market_cap"] = model_df["ticker"].astype(str).map(market_cap_map)
+
+    # 與 App 共用計分（帶基本面品質加成，排名與 App 一致）
     model_df["final_composite"] = QuantModel.compute_final_composite(
-        model_df, preferred_groups=[], sentiment_data={}, fundamental_data={}
+        model_df, preferred_groups=[], sentiment_data={}, fundamental_data=fundamental_data
     )
 
     benchmark = fetch_benchmark_close()
@@ -90,6 +160,8 @@ def main():
     engine.save(LEDGER_FILE)
 
     metrics = engine.equity_metrics()
+    if rec.get("relaxed"):
+        print(f"[INFO] 選股池放寬過濾層：{rec['relaxed']}（合格池不足時逐層放寬）")
     print(f"[OK] NAV={rec['nav']:.0f}  持倉={rec['n_pos']}  "
           f"累積={rec['cum_return_pct']}%  基準={rec.get('bench_return_pct')}%")
     print(f"[OK] 指標：Sharpe={metrics['sharpe']} MDD={metrics['max_drawdown_pct']}% "
