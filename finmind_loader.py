@@ -236,23 +236,49 @@ class FinMindLoader:
                             out["eps"] = round(float(eps_series.iloc[-4:].sum()), 2)  # TTM
                         elif len(eps_series) > 0:
                             out["eps"] = _f(eps_series.iloc[-1])
-                    # 三率（毛利 / 營益 / 淨利）：取最新一季
+                    # 三率（毛利 / 營益 / 淨利）：改用近四季 TTM 合計，與 EPS(TTM) 口徑一致
+                    # （sum(近四季分子) / sum(近四季 Revenue)），避免單季與 TTM EPS 混用。
+                    # 四季不足時退回最新單季（維持舊行為）。
                     # 注意：FinMind 稅後淨利欄位為 IncomeAfterTaxes（非 NetIncome），
                     #       營業利益為 OperatingIncome。
-                    gp = _f(last.get("GrossProfit"))
-                    rv = _f(last.get("Revenue"))
-                    if gp is not None and rv:
-                        out["gross_margin"] = round(gp / rv * 100, 2)
-                    oi = _f(last.get("OperatingIncome"))
-                    if oi is not None and rv:
-                        out["operating_margin"] = round(oi / rv * 100, 2)
-                    ni = next((v for v in (
-                        _f(last.get("IncomeAfterTaxes")),
-                        _f(last.get("NetIncome")),
-                        _f(last.get("IncomeFromContinuingOperations")),
-                    ) if v is not None), None)
-                    if ni is not None and rv:
-                        out["net_margin"] = round(ni / rv * 100, 2)
+                    def _ttm_margin(col_candidates):
+                        """近四季分子合計 / 近四季 Revenue 合計 ×100；不足四季退回單季。"""
+                        # 選第一個存在的分子欄位
+                        num_col = next((c for c in col_candidates if c in pv.columns), None)
+                        if num_col is None or "Revenue" not in pv.columns:
+                            return None
+                        num_s = pv[num_col].dropna()
+                        rev_s = pv["Revenue"].dropna()
+                        # 對齊分子與 Revenue 皆有值的季度
+                        common = num_s.index.intersection(rev_s.index)
+                        if len(common) == 0:
+                            return None
+                        num_a = pv.loc[common, num_col]
+                        rev_a = pv.loc[common, "Revenue"]
+                        if len(common) >= 4:
+                            num_sum = float(num_a.iloc[-4:].sum())
+                            rev_sum = float(rev_a.iloc[-4:].sum())
+                        else:
+                            # 四季不足 → 退回最新單季（舊行為）
+                            num_sum = _f(num_a.iloc[-1])
+                            rev_sum = _f(rev_a.iloc[-1])
+                            if num_sum is None or rev_sum is None:
+                                return None
+                        if not rev_sum:
+                            return None
+                        return round(num_sum / rev_sum * 100, 2)
+
+                    gm = _ttm_margin(["GrossProfit"])
+                    if gm is not None:
+                        out["gross_margin"] = gm
+                    om = _ttm_margin(["OperatingIncome"])
+                    if om is not None:
+                        out["operating_margin"] = om
+                    nm = _ttm_margin(
+                        ["IncomeAfterTaxes", "NetIncome", "IncomeFromContinuingOperations"]
+                    )
+                    if nm is not None:
+                        out["net_margin"] = nm
                     # EPS YoY：近四季 TTM vs 前四季 TTM（日期比對，不用位置索引）
                     if "EPS" in pv.columns:
                         eps_s = pv["EPS"].dropna()

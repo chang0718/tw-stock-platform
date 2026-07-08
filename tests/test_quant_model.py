@@ -285,3 +285,82 @@ class TestCrossSectionalScore:
         result = model._cross_sectional_score(s)
         median_score = float(result.median())
         assert 40.0 < median_score < 60.0
+
+
+# ============================================================
+# 8. calculate_probability：score_std 資料驅動除數
+# ============================================================
+
+class TestProbabilityStd:
+    def test_default_std_unchanged(self, model):
+        """預設 score_std=15 → 與舊行為一致（回歸保護）"""
+        r_def = model.calculate_probability(65, 20, 40, 25)
+        r_15  = model.calculate_probability(65, 20, 40, 25, score_std=15.0)
+        assert r_def["probability"] == r_15["probability"]
+
+    def test_smaller_std_sharper(self, model):
+        """較小 std → z 較大 → 高分股機率更高（刻度更陡）"""
+        p_wide = model.calculate_probability(70, 20, 40, 25, score_std=25.0)["probability"]
+        p_narrow = model.calculate_probability(70, 20, 40, 25, score_std=8.0)["probability"]
+        assert p_narrow > p_wide
+
+    def test_zero_std_falls_back(self, model):
+        """score_std<=0 → 退回 15，不崩潰"""
+        r0 = model.calculate_probability(60, 20, 40, 25, score_std=0.0)
+        r15 = model.calculate_probability(60, 20, 40, 25, score_std=15.0)
+        assert r0["probability"] == r15["probability"]
+
+
+# ============================================================
+# 9. _apply_cross_sectional_scores：因子構建（F3/F5）
+# ============================================================
+
+class TestCrossSectionalFactors:
+    @staticmethod
+    def _sample_df():
+        n = 8
+        return pd.DataFrame({
+            "ticker":       [f"T{i}" for i in range(n)],
+            "group":        ["G"] * n,
+            "has_real_fund": [True] * n,
+            "pe":           [10, 12, 15, 20, 8, 25, 30, 18],
+            "pb":           [1.0, 1.5, 2.0, 3.0, 0.8, 4.0, 5.0, 2.5],
+            "gross_margin": [40, 30, 50, 20, 45, 15, 35, 25],
+            "net_margin":   [15, 10, 20, 5, 18, 3, 12, 8],
+            "eps_growth":   [50, 5, -10, 30, 20, 0, 40, 15],
+            "revenue_yoy":  [20, 5, -5, 15, 25, 0, 10, 8],
+            "foreign_net":  [1000, -500, 200, 0, 800, -300, 100, 50],
+            "volume":       [5000, 3000, 8000, 1000, 6000, 500, 4000, 2000],
+            "volatility":   [20, 25, 15, 40, 18, 50, 22, 30],
+            "m20":          [5, -3, 8, -10, 6, -15, 2, 0],
+            "m60":          [10, -5, 12, -20, 8, -25, 3, 1],
+            "change_pct":   [1, -1, 2, -3, 1.5, -4, 0.5, 0],
+        })
+
+    def test_value_uses_ep_and_bp(self, model):
+        """value 為 E/P + B/P 合成：低 PE 且低 PB 的股票分數最高"""
+        df = self._sample_df()
+        r = model._apply_cross_sectional_scores(df)
+        # index 4：PE=8、PB=0.8（最便宜）應得高於 index 6：PE=30、PB=5
+        assert r["value_score"].iloc[4] > r["value_score"].iloc[6]
+
+    def test_quality_excludes_eps_growth(self, model):
+        """quality 只用毛利/淨利（+ROE），eps_growth 大幅變動不應改變 quality"""
+        df = self._sample_df()
+        r1 = model._apply_cross_sectional_scores(df)
+        df2 = df.copy()
+        df2["eps_growth"] = df2["eps_growth"] * -1  # 反轉 eps_growth
+        r2 = model._apply_cross_sectional_scores(df2)
+        # quality 不含 eps_growth → 兩者相同
+        pd.testing.assert_series_equal(
+            r1["quality_score"], r2["quality_score"], check_names=False
+        )
+
+    def test_quality_includes_roe_when_present(self, model):
+        """有 roe 欄且有資料時，roe 影響 quality"""
+        df = self._sample_df()
+        base = model._apply_cross_sectional_scores(df)["quality_score"]
+        df_roe = df.copy()
+        df_roe["roe"] = [25, 5, 30, 2, 22, 1, 15, 8]
+        with_roe = model._apply_cross_sectional_scores(df_roe)["quality_score"]
+        assert not base.equals(with_roe)

@@ -4,12 +4,16 @@
 
 | 因子 | 預設權重 | 數據來源 | 計算方式 | 學術依據 |
 |---|---|---|---|---|
-| **動能** momentum | 25% | 本機歷史快照 | MA20 乖離(60%) + MA60 乖離(40%) | Jegadeesh-Titman 1993 |
+| **動能** momentum | 25% | 本機歷史快照 | 60 日累積報酬（跳過近 5 日）；歷史不足退回 MA20/MA60「趨勢乖離」，再退回今日漲跌%（短期代理） | Jegadeesh-Titman 1993 |
 | **成長** growth | 20% | FinMind API | 營收 YoY + EPS 成長率 平均 | 盈餘動能文獻 |
-| **品質** quality | 20% | FinMind API | 毛利率 + 淨利率 + EPS 成長 平均 | Novy-Marx 2013 |
-| **價值** value | 15% | FinMind API | E/P = 1/PE（越便宜分數越高） | Fama-French 1992 |
+| **品質** quality | 20% | FinMind API | 毛利率 + 淨利率（+ ROE 若有）平均；**不含 EPS 成長**（避免與 growth 雙計） | Novy-Marx 2013 |
+| **價值** value | 15% | FinMind API | E/P = 1/PE 與 B/P = 1/PB 合成（各自跨截面後平均，越便宜分數越高） | Fama-French 1992 |
 | **籌碼** flow | 10% | TWSE T86 | 外資淨買超（千股） | Gompers-Metrick 2001 |
 | **低波動** low_vol | 10% | 本機歷史快照 | 20 日波動率（越低越好） | Frazzini-Pedersen 2014 |
+
+> **動能因子正名**：以往「動能」實為 MA 乖離（趨勢偏離度）。現優先使用真正的
+> **60 日累積報酬（跳過近 5 日）**對齊 Jegadeesh-Titman；歷史快照不足時才退回
+> MA20/MA60「趨勢乖離」，最後退回今日漲跌%（僅為短期代理，非動能因子）。
 
 > **重要**：六大因子全部用**跨截面 Z-score 標準化**（和當日全市場所有股票比較排名），不是絕對分。
 > 無基本面數據的股票，成長／品質／價值固定給中性 50 分，防止假訊號。
@@ -36,12 +40,19 @@
 **計算公式：**
 
 ```
-z = (composite_score - 50) / 15 + horizon_adj - risk_penalty
+z = (composite_score - 50) / score_std + horizon_adj - risk_penalty
 prob = Φ(z) × 100，範圍限制在 10–90%
 ```
 
+- `score_std`：**資料驅動除數**。全量計算（`enrich_dataframe`）時取當日全市場
+  `composite_score` 的實際跨截面標準差，clamp 至 `[8, 25]`（取代舊版硬編魔數 15）；
+  單股頁面（`enrich_company`）無跨截面樣本，沿用預設 15。
 - `risk_penalty`：風險分 > 70 時 −0.15，> 55 時 −0.10，其餘 0
 - `Φ`：標準常態分佈 CDF（使用 Acklam 有理近似，不依賴 scipy）
+
+> ⚠️ **機率為統計刻度、非回測校準**：此機率是把跨截面分數映射到 0–1 的常態機率，
+> 用於**相對排序**，**未**以長期回測實證校準（未驗證預測命中率）。不應解讀為
+> 「真實上漲機率」，更不構成投資建議。
 
 ---
 
@@ -112,5 +123,5 @@ final_composite =
 
 ---
 
-*本文件對應程式碼：`quant_model.py`、`config.py`*
+*本文件對應程式碼：`quant_model.py`、`config.py`、`forecast.py`（前瞻推估）*
 *以上評分僅供個人研究參考，不構成任何投資建議。*

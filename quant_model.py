@@ -6,7 +6,8 @@ v4.0 嚴謹版：因子分數改跨截面 Z-score 標準化
 - 價值因子 (E/P)：Fama & French (1992)
 - 品質因子 (毛利率/淨利率/EPS)：Novy-Marx (2013)
 - 成長因子 (營收/EPS動能)：earnings momentum literature
-- 動能因子 (MA乖離)：Jegadeesh & Titman (1993)
+- 動能因子：60日累積報酬（跳過近5日，Jegadeesh & Titman 1993）；
+  歷史不足時退回 MA20/MA60 趨勢乖離，再退回今日漲跌%（短期代理，非動能因子）
 - 籌碼因子 (法人淨買)：Gompers & Metrick (2001)
 - 低波動因子：Frazzini & Pedersen (2014)
 - 期望報酬率：對數常態報酬 E[R]=σ×Φ⁻¹(p)
@@ -232,10 +233,12 @@ class QuantModel:
         以同期全市場股票為基準，對每個因子做跨截面 Z-score 標準化。
 
         因子構建依據：
-        value      : E/P = 1/PE，越高越便宜（Fama-French 1992）
-        quality    : 毛利率、淨利率、EPS 成長的平均跨截面評分（Novy-Marx 2013）
+        value      : E/P = 1/PE 與 B/P = 1/PB 合成（各自跨截面後平均，Fama-French 1992）
+        quality    : 毛利率、淨利率（+ROE 若有）平均跨截面評分（Novy-Marx 2013）；
+                     不含 EPS 成長（避免與 growth 因子雙重計數）
         growth     : 營收 YoY、EPS 成長的平均跨截面評分（盈餘動能文獻）
-        momentum   : MA20 + MA60 乖離率（Jegadeesh-Titman 1993，20日=中期動能）
+        momentum   : 60日累積報酬（跳過近5日，Jegadeesh-Titman 1993）；歷史不足時退回
+                     MA20/MA60「趨勢乖離」，再退回今日漲跌%（短期代理，非動能因子）
         flow       : 外資淨買（法人效應，Gompers-Metrick 2001）
         low_vol    : 負波動率（低波動異象，Frazzini-Pedersen 2014）
 
@@ -245,16 +248,30 @@ class QuantModel:
         r = df.copy()
         has_fund = df.get("has_real_fund", pd.Series(False, index=df.index)).fillna(False)
 
-        # ── Value: E/P ratio（越高越便宜）──
+        # ── Value: E/P + B/P 合成（越高越便宜；各自跨截面後平均）──
+        # E/P = 1/PE，B/P = 1/PB；只有其一時用該一，皆無時中性 50。
         pe_num = pd.to_numeric(df["pe"], errors="coerce")
+        pb_num = pd.to_numeric(df.get("pb", pd.Series(np.nan, index=df.index)), errors="coerce")
         ep = pe_num.apply(lambda x: 1.0 / x if pd.notna(x) and x > 0 else np.nan)
-        value_cs = self._cross_sectional_score(ep, higher_is_better=True)
+        bp = pb_num.apply(lambda x: 1.0 / x if pd.notna(x) and x > 0 else np.nan)
+        ep_cs = self._cross_sectional_score(ep, higher_is_better=True)
+        bp_cs = self._cross_sectional_score(bp, higher_is_better=True)
+        # 有效性遮罩：跨截面對 NaN 已給 50，這裡以原始值是否存在決定是否納入平均
+        ep_ok = ep.notna()
+        bp_ok = bp.notna()
+        both = ep_ok & bp_ok
+        value_cs = ep_cs.copy()
+        value_cs = value_cs.where(~both, (ep_cs + bp_cs) / 2.0)   # 兩者皆有 → 平均
+        value_cs = value_cs.where(~(bp_ok & ~ep_ok), bp_cs)       # 僅 B/P → 用 B/P
         r["value_score"] = value_cs.where(has_fund, 50.0)
 
-        # ── Quality: 三指標平均（已各自跨截面標準化，直接平均即可；
-        #    不再對平均值二次 Z-score，避免壓縮有效數據與無數據股票的差距）──
-        q_components = [self._col_cs(df, col, up=True)
-                        for col in ["gross_margin", "net_margin", "eps_growth"]]
+        # ── Quality: 毛利率 + 淨利率（+ROE 若有）平均（已各自跨截面標準化，直接平均即可；
+        #    不再對平均值二次 Z-score，避免壓縮有效數據與無數據股票的差距）。
+        #    移除 eps_growth：避免與 growth 因子雙重計數。──
+        q_cols = ["gross_margin", "net_margin"]
+        if "roe" in df.columns and pd.to_numeric(df["roe"], errors="coerce").notna().any():
+            q_cols.append("roe")
+        q_components = [self._col_cs(df, col, up=True) for col in q_cols]
         quality_raw = pd.concat(q_components, axis=1).mean(axis=1)
         r["quality_score"] = quality_raw.where(has_fund, 50.0)
 
@@ -264,17 +281,40 @@ class QuantModel:
         growth_raw = pd.concat(g_components, axis=1).mean(axis=1)
         r["growth_score"] = growth_raw.where(has_fund, 50.0)
 
-        # ── Momentum: MA20(60%) + MA60(40%)，無歷史時以今日漲跌%代理 ──
-        # change_pct 全市場皆有，無快照時用它做跨截面排名，避免全部 50
+        # ── Momentum: 優先 60日累積報酬（跳過近5日，Jegadeesh-Titman 1993）；
+        #    price_history 不足時退回 MA20/MA60「趨勢乖離」；再退回今日漲跌%
+        #    （change_pct 全市場皆有，屬短期代理、非動能因子，避免全部 50）──
+        # 1) 從 price_history 計算 60日動能（跳過近5日）
+        def _mom_60d(ticker: str):
+            hist = self.price_history.get(ticker, [])
+            closes = [p["close"] for p in hist if p.get("close") is not None]
+            # 需 65 筆（60日窗 + 跳過近5日），不足則回 NaN 交給下層退回機制
+            if len(closes) < 65:
+                return np.nan
+            recent = closes[-6]          # 跳過最近 5 日（-1..-5），以 -6 為終點
+            past   = closes[-65]         # 60 個交易日前
+            if past <= 0:
+                return np.nan
+            return (recent - past) / past * 100.0
+
+        mom60_raw = df["ticker"].apply(_mom_60d) if "ticker" in df.columns \
+            else pd.Series(np.nan, index=df.index)
+        has_mom60 = mom60_raw.notna()
+        mom60_cs = self._cross_sectional_score(mom60_raw, higher_is_better=True)
+
+        # 2) 趨勢乖離退回層：MA20(60%) + MA60(40%)
         m20_s = self._col_cs(df, "m20", True)
         m60_s = self._col_cs(df, "m60", True)
         cp_s  = self._col_cs(df, "change_pct", True)
         has_m20 = pd.to_numeric(df.get("m20", pd.Series(dtype=float)), errors="coerce").notna()
-        momentum_raw = (
+        bias_raw = (
             m20_s.where(has_m20, cp_s) * 0.6 +
             m60_s.where(has_m20, cp_s) * 0.4
         )
-        r["momentum_score"] = self._cross_sectional_score(momentum_raw, higher_is_better=True)
+        bias_cs = self._cross_sectional_score(bias_raw, higher_is_better=True)
+
+        # 有 60日動能者優先用真動能，其餘用趨勢乖離（含 change_pct 短期代理）
+        r["momentum_score"] = mom60_cs.where(has_mom60, bias_cs)
 
         # ── Flow: 外資淨買（千股）；無外資資料時以成交量跨截面排名代理 ──
         # volume 反映市場關注度，無法人資料時給 25-75 範圍（不給滿分 50 避免與有資料混淆）
@@ -317,21 +357,28 @@ class QuantModel:
         horizon: int,
         risk_score: float,
         volatility: float,
+        score_std: float = 15.0,
     ) -> Dict:
         """
         機率計算依據：
-        - z = (composite_score - 50) / 15
-          composite_score 為跨截面標準化後的加權分數，std ≈ 15
+        - z = (composite_score - 50) / score_std
+          composite_score 為跨截面標準化後的加權分數；score_std 為當日全市場
+          composite_score 的實際跨截面標準差（enrich_dataframe 傳入，clamp 8~25）。
+          單股路徑（enrich_company）無跨截面樣本，沿用預設 15.0。
         - horizon 調整：
             5日：短期反轉傾向 (Jegadeesh 1990)，輕微負調整
             60日：中期動能持續 (Jegadeesh-Titman 1993)，輕微正調整
         - 風險懲罰：高風險股預測方向不確定性更高
         - 移除任意縮放係數（原 *0.72）及主觀 industry_boost
+
+        ⚠️ 注意：本機率為「統計刻度」（把分數映射到 0-1 的常態機率），
+           並非以長期回測實證校準（未驗證預測命中率）。僅供相對排序參考。
         """
         horizon_adj  = {5: -0.08, 20: 0.0, 60: 0.10}.get(horizon, 0.0)
         risk_penalty = 0.15 if risk_score > 70 else (0.10 if risk_score > 55 else 0.0)
 
-        z           = (composite_score - 50) / 15 + horizon_adj - risk_penalty
+        std = score_std if (score_std and score_std > 0) else 15.0
+        z           = (composite_score - 50) / std + horizon_adj - risk_penalty
         probability = clamp(self._norm_cdf(z) * 100, 10, 90)
 
         confidence  = clamp(
@@ -499,6 +546,36 @@ class QuantModel:
         result["macd_pre_cross"] = result["ticker"].apply(_macd_pre_cross)
 
         # Pass 3：用跨截面因子分數重算 composite / risk / probability
+        # 3a. 先重算所有 composite（含技術動能混合路徑），供機率刻度校準使用
+        def _recompute_composite(row) -> float:
+            scores = {
+                "value_score":    row["value_score"],
+                "quality_score":  row["quality_score"],
+                "growth_score":   row["growth_score"],
+                "momentum_score": row["momentum_score"],
+                "flow_score":     row["flow_score"],
+                "low_vol_score":  row["low_vol_score"],
+            }
+            composite = self.calculate_composite_score(scores)
+            if not row.get("has_real_fund", False):
+                tech_composite = (
+                    scores["momentum_score"] * 0.45
+                    + scores["flow_score"]   * 0.30
+                    + scores["low_vol_score"] * 0.25
+                )
+                composite = round(tech_composite * 0.6 + composite * 0.4, 2)
+            return composite
+
+        composites = result.apply(_recompute_composite, axis=1)
+
+        # 機率刻度校準：以當日 composite_score 的實際跨截面標準差為除數（取代硬編 15），
+        # clamp 至合理範圍 [8, 25] 避免極端分布（過窄→機率飽和；過寬→毫無區辨）。
+        comp_valid = pd.to_numeric(composites, errors="coerce").dropna()
+        score_std = float(comp_valid.std(ddof=1)) if len(comp_valid) >= 2 else 15.0
+        if not (score_std and score_std > 0):
+            score_std = 15.0
+        score_std = float(min(25.0, max(8.0, score_std)))
+
         for idx, row in result.iterrows():
             scores = {
                 "value_score":    row["value_score"],
@@ -512,17 +589,7 @@ class QuantModel:
                 "pe":         row.get("pe"),
                 "volatility": row.get("volatility"),
             }
-            composite = self.calculate_composite_score(scores)
-
-            # 混合評分路徑：無基本面股票改用技術/動能/籌碼加權
-            if not row.get("has_real_fund", False):
-                tech_composite = (
-                    scores["momentum_score"] * 0.45
-                    + scores["flow_score"]   * 0.30
-                    + scores["low_vol_score"] * 0.25
-                )
-                # 混合：技術路徑 60%，原始路徑 40%（避免完全忽略任何因子）
-                composite = round(tech_composite * 0.6 + composite * 0.4, 2)
+            composite = float(composites.at[idx])
 
             result.at[idx, "scoring_path"] = "完整" if row.get("has_real_fund", False) else "技術動能"
 
@@ -530,7 +597,7 @@ class QuantModel:
             vol       = row.get("volatility") or 25
 
             for h in [5, 20, 60]:
-                r = self.calculate_probability(composite, h, risk, vol)
+                r = self.calculate_probability(composite, h, risk, vol, score_std=score_std)
                 result.at[idx, f"prob{h}"] = r["probability"]
                 if h == 20:
                     result.at[idx, "confidence"] = r["confidence"]
