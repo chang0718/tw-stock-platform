@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -159,14 +159,23 @@ class RadarLoader:
         chains       = {c["id"]: c for c in chains_raw.get("supply_chains", [])}
         today        = date.today()
 
+        # 種子事件 + 週期性引擎自動生成的事件（後者避免種子過期造成事件雷達枯竭）
+        all_events = list(raw.get("seed_events", [])) + self._generate_recurring_events(today, days)
+
         results: List[Dict] = []
-        for ev in raw.get("seed_events", []):
+        _seen = set()
+        for ev in all_events:
             start = _parse_date(ev.get("start_date"))
             if start is None:
                 continue
             d_until = _days_until(start, today)
             if d_until < 0 or d_until > days:
                 continue
+            # 去重（種子與週期生成可能重疊）：以 (標題, 日期) 為鍵
+            _dk = (str(ev.get("title", "")), str(start))
+            if _dk in _seen:
+                continue
+            _seen.add(_dk)
 
             et_id   = str(ev.get("event_type", ""))
             et_def  = event_types.get(et_id, {})
@@ -226,6 +235,58 @@ class RadarLoader:
         results.sort(key=lambda x: (-x["priority_score"], x["days_until"]))
         self._put(key, results)
         return results
+
+    def _generate_recurring_events(self, today: date, days: int) -> List[Dict]:
+        """
+        依 data/recurring_event_templates.json 於執行時動態生成未來 `days` 天內的
+        週期性事件（月營收公布、CPI、FOMC、台積電法說、SEMICON 等），避免種子過期。
+        日期不確定者範本已標「推定」status，忠實傳遞、不假裝官方確認。
+        """
+        tpl = _load_json("recurring_event_templates.json")
+        if not isinstance(tpl, dict):
+            return []
+        horizon = today + timedelta(days=days)
+        out: List[Dict] = []
+
+        # 每月固定日事件（如月營收次月 10 日、CPI 約當月中）
+        for r in tpl.get("monthly", []):
+            day = int(r.get("day", 10))
+            y, m = today.year, today.month
+            for _ in range((days // 28) + 2):
+                try:
+                    d = date(y, m, day)
+                except ValueError:
+                    d = None
+                if d is not None and today <= d <= horizon:
+                    out.append({
+                        "id":          f"{r.get('id','recurring')}-{d.strftime('%Y%m')}",
+                        "title":       r.get("title", ""),
+                        "event_type":  r.get("event_type", ""),
+                        "start_date":  str(d),
+                        "status":      r.get("status", "推定"),
+                        "source_name": r.get("source_name", ""),
+                        "source_url":  r.get("source_url", ""),
+                        "watch_points": r.get("watch_points", []),
+                    })
+                m += 1
+                if m > 12:
+                    m, y = 1, y + 1
+
+        # 固定日期事件（FOMC / 法說 / 展會等，範本已標推定）
+        for r in tpl.get("scheduled", []):
+            d = _parse_date(r.get("date"))
+            if d is not None and today <= d <= horizon:
+                out.append({
+                    "id":          r.get("id", "scheduled"),
+                    "title":       r.get("title", ""),
+                    "event_type":  r.get("event_type", ""),
+                    "start_date":  str(d),
+                    "status":      r.get("status", "推定"),
+                    "source_name": r.get("source_name", ""),
+                    "source_url":  r.get("source_url", ""),
+                    "watch_points": r.get("watch_points", []),
+                })
+        return out
 
     def get_active_themes(self) -> List[Dict]:
         """

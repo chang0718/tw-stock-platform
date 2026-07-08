@@ -68,6 +68,42 @@ class TWSeInstitutionalLoader:
         except (ValueError, TypeError):
             return 0
 
+    @staticmethod
+    def _records_date(data: dict) -> Optional[str]:
+        """從已建立的結果字典取出資料日期（ISO YYYY-MM-DD），供日期對齊判斷。"""
+        if isinstance(data, dict):
+            for v in data.values():
+                if isinstance(v, dict) and v.get("date"):
+                    return v["date"]
+        return None
+
+    def _stale_for(self, data: dict, prefer_date: Optional[str]) -> bool:
+        """指定對齊日期時，若快取資料日期不符即視為過時（需重抓對齊）。"""
+        if not prefer_date:
+            return False
+        return self._records_date(data) != prefer_date
+
+    @staticmethod
+    def _date_candidates(prefer_date: Optional[str]):
+        """產生嘗試日期清單：優先對齊 prefer_date（行情日期），再退回最近 3 個交易日。"""
+        cands = []
+        if prefer_date:
+            try:
+                cands.append(datetime.strptime(prefer_date, "%Y-%m-%d"))
+            except (ValueError, TypeError):
+                pass
+        for delta in range(3):
+            cands.append(datetime.now() - timedelta(days=delta))
+        # 去重（保序）+ 濾掉週末
+        seen, out = set(), []
+        for dt in cands:
+            ymd = dt.strftime("%Y%m%d")
+            if ymd in seen or dt.weekday() >= 5:
+                continue
+            seen.add(ymd)
+            out.append(dt)
+        return out
+
     # ── FinMind 備援（單股，已有 FinMind token 才有效）──────────────
 
     def _finmind_inst_fallback(self, token: str = "") -> Dict[str, Dict]:
@@ -115,22 +151,25 @@ class TWSeInstitutionalLoader:
 
     # ── 三大法人 ──────────────────────────────────────────────────
 
-    def get_institutional_all(self, finmind_token: str = "") -> Dict[str, Dict]:
+    def get_institutional_all(
+        self, finmind_token: str = "", prefer_date: Optional[str] = None
+    ) -> Dict[str, Dict]:
         """
         取得全市場三大法人買賣超（1 天快取）
+
+        prefer_date（ISO YYYY-MM-DD）：優先抓「與行情同一交易日」的法人資料，避免卡面
+        價格與法人分屬不同日期造成誤解（例：價格 07-02、法人 07-03）。該日 T86 尚未
+        發布才退回最近一筆；每筆結果均含實際 `date` 欄供 UI 標注。
         單次 API 呼叫取得所有股票。API 原始單位為「股」，
         本方法已換算為「張」（= 1,000 股 = 千股）後回傳，與全平台顯示一致。
         """
         key = "inst"
         cached = self._hit(key)
-        if cached is not None:
+        if cached is not None and not self._stale_for(cached, prefer_date):
             return cached
 
-        # 往前找最近 3 個交易日（法人資料最多延遲 1 天，不需要找 7 天）
-        for delta in range(3):
-            dt = datetime.now() - timedelta(days=delta)
-            if dt.weekday() >= 5:
-                continue
+        # 優先對齊行情日期，再退回最近 3 個交易日（法人資料最多延遲 1 天）
+        for dt in self._date_candidates(prefer_date):
             try:
                 r = self.session.get(
                     "https://www.twse.com.tw/fund/T86",
@@ -206,20 +245,17 @@ class TWSeInstitutionalLoader:
 
     # ── 融資融券 ──────────────────────────────────────────────────
 
-    def get_margin_all(self) -> Dict[str, Dict]:
+    def get_margin_all(self, prefer_date: Optional[str] = None) -> Dict[str, Dict]:
         """
         取得全市場融資融券餘額（1 天快取）
-        單次 API 呼叫取得所有股票
+        單次 API 呼叫取得所有股票；prefer_date 優先對齊行情日期（同 get_institutional_all）。
         """
         key = "margin"
         cached = self._hit(key)
-        if cached is not None:
+        if cached is not None and not self._stale_for(cached, prefer_date):
             return cached
 
-        for delta in range(3):
-            dt = datetime.now() - timedelta(days=delta)
-            if dt.weekday() >= 5:
-                continue
+        for dt in self._date_candidates(prefer_date):
             try:
                 r = self.session.get(
                     "https://www.twse.com.tw/exchangeReport/MI_MARGN",

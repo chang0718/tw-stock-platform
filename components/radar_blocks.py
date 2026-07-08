@@ -14,9 +14,10 @@ _HEAT_COLOR = {
 }
 
 _STATUS_BADGE = {
-    "official":  ("✅", "#26a69a"),
-    "scheduled": ("📅", "#1f6feb"),
-    "watch":     ("👁️", "#8b949e"),
+    "official":  ("✅ 官方確認", "#26a69a"),
+    "scheduled": ("📅 制度排程", "#1f6feb"),
+    "watch":     ("👁️ 觀察", "#8b949e"),
+    "推定":       ("🔶 週期推定", "#d29922"),
 }
 
 _WINDOW_COLOR = {
@@ -129,7 +130,7 @@ def render_event_calendar(events: List[Dict], max_events: int = 12) -> None:
 
         with st.expander(
             f"{ev.get('icon','📌')} **{ev.get('title','')}**　"
-            f"`{ev.get('start_date','')}` · {days_until} 天後　{direction_label}",
+            f"`{ev.get('start_date','')}` · {days_until} 天後　{direction_label}　{status_icon}",
             expanded=False,
         ):
             c1, c2, c3 = st.columns([2, 2, 3])

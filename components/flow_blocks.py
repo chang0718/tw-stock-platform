@@ -19,11 +19,13 @@ def render_flow_block(stock: dict, show_reload: bool = False):
             if st.button("🔄 重新載入三大法人資料", key="reload_inst"):
                 with st.spinner("載入中..."):
                     il = TWSeInstitutionalLoader()
+                    _pd = st.session_state.get("data_date", "")
                     st.session_state.institutional_data = {
                         "inst":   il.get_institutional_all(
-                            finmind_token=st.session_state.get("finmind_token", "")
+                            finmind_token=st.session_state.get("finmind_token", ""),
+                            prefer_date=_pd,
                         ) or {},
-                        "margin": il.get_margin_all() or {},
+                        "margin": il.get_margin_all(prefer_date=_pd) or {},
                     }
                     st.session_state.model_cache_key = ""
                 st.rerun()

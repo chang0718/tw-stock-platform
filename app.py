@@ -168,10 +168,10 @@ def load_market_data_action(include_tpex: bool = True):
         token = st.session_state.get("finmind_token", "")
 
         def _load_inst():
-            return inst_loader.get_institutional_all(finmind_token=token)
+            return inst_loader.get_institutional_all(finmind_token=token, prefer_date=data_date)
 
         def _load_margin():
-            return inst_loader.get_margin_all()
+            return inst_loader.get_margin_all(prefer_date=data_date)
 
         inst = margin = {}
         try:
@@ -196,6 +196,15 @@ def load_market_data_action(include_tpex: bool = True):
         st.success(f"✅ 三大法人已載入（{n_inst} 檔）")
     else:
         st.warning("⚠️ 三大法人暫時無法取得（非交易日、API 逾時或無資料）")
+
+
+def _institutional_data_date() -> str:
+    """回傳目前載入之法人資料的實際日期（ISO），供 UI 標注、避免與行情日期錯位誤解。"""
+    inst = (st.session_state.get("institutional_data") or {}).get("inst") or {}
+    for v in inst.values():
+        if isinstance(v, dict) and v.get("date"):
+            return v["date"]
+    return ""
 
 
 def load_csv_action(uploaded_file):
@@ -2817,6 +2826,16 @@ def main():
                         st.caption("ℹ️ 「外資合計(全族群)」= 本族群所有成分股的外資買賣超加總，"
                                    "**不是**單一個股數字；個股外資張數見下方清單「籌碼」欄。")
 
+                        # 法人資料日期標注：避免價格日期與法人日期錯位造成誤解（例：價格 07-02、法人 07-03）
+                        _inst_date = _institutional_data_date()
+                        _price_date = st.session_state.get("data_date", "")
+                        if _inst_date:
+                            if _price_date and _inst_date != _price_date:
+                                st.caption(f"⚠️ 法人資料日期 **{_inst_date}**，與行情日期 **{_price_date}** "
+                                           "不同日（法人資料較新，通常早一步發布）；比對時請以各自日期為準。")
+                            else:
+                                st.caption(f"🏦 法人資料日期：**{_inst_date}**（與行情同日）")
+
                     st.markdown("---")
 
                     # ── ⭐ 本族群基本面前三名（先顯示，方便快速識別優質標的）───
@@ -3193,22 +3212,47 @@ def main():
         if model_df.empty:
             st.warning("⚠️ 請先載入市場資料")
         else:
-            # 條件說明
-            c1, c2, c3, c4 = st.columns(4)
-            c1.info("📉 落後同族群")
-            c2.info("🏦 外資淨買超")
-            c3.info("📈 技術金叉中")
-            c4.info("📊 基本面及格")
-
-            st.markdown("---")
-
             with st.spinner("分析中..."):
                 catchup_df = model.find_catchup_candidates(model_df, top_n=10)
 
             if catchup_df.empty:
                 st.info("目前條件下無符合候選（需要籌碼數據與技術面資料，請先載入市場資料）")
+                # 仍顯示四分類條件說明（無命中）
+                c1, c2, c3, c4 = st.columns(4)
+                c1.info("📉 落後同族群"); c2.info("🏦 外資淨買超")
+                c3.info("📈 技術金叉中"); c4.info("📊 基本面及格")
             else:
-                st.markdown(f"**找到 {len(catchup_df)} 支補漲候選**")
+                # ── 四分類：各條件實際命中哪些個股（原本只有圖例，看不到標在哪）──
+                def _flag_lag(r):  return (r.get("peer_lag_score") or 0) > 55
+                def _flag_inst(r): return bool(r.get("inst_entry")) or (r.get("foreign_net") or 0) > 0
+                def _flag_tech(r): return bool(r.get("kd_cross")) or bool(r.get("macd_pre_cross"))
+                def _flag_fund(r): return (r.get("quality_score") or 0) > 50 and (r.get("growth_score") or 0) > 50
+
+                _cats = [
+                    ("📉 落後同族群", _flag_lag,  "同族群動能落後、具補漲空間"),
+                    ("🏦 外資淨買超", _flag_inst, "外資買超／剛開始入場"),
+                    ("📈 技術金叉中", _flag_tech, "KD 金叉或 MACD 柱收斂"),
+                    ("📊 基本面及格", _flag_fund, "品質分與成長分皆 > 50"),
+                ]
+                _rows = list(catchup_df.iterrows())
+                _cat_cols = st.columns(4)
+                for _cc, (_title, _fn_flag, _desc) in zip(_cat_cols, _cats):
+                    _hits = [r for _, r in _rows if _fn_flag(r)]
+                    with _cc:
+                        st.markdown(f"**{_title}**")
+                        st.caption(f"{_desc}｜命中 {len(_hits)} 檔")
+                        if _hits:
+                            for _r in _hits:
+                                st.markdown(
+                                    f"<span style='font-size:0.85em'>{_r.get('ticker','')} "
+                                    f"{str(_r.get('name',''))[:6]}</span>",
+                                    unsafe_allow_html=True,
+                                )
+                        else:
+                            st.caption("—")
+
+                st.markdown("---")
+                st.markdown(f"**找到 {len(catchup_df)} 支補漲候選**（下方展開看完整訊號與估值）")
                 for rank, (_, row) in enumerate(catchup_df.iterrows(), 1):
                     ticker  = row.get("ticker", "")
                     name    = row.get("name", "")

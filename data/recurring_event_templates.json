@@ -1,0 +1,67 @@
+{
+  "_comment": "週期性事件範本：由 radar_loader._generate_recurring_events 於執行時依當下日期自動生成未來事件，避免種子過期。日期不確定者一律標『推定』，不假裝官方確認（守反造假原則）。實際日期以各官方來源為準。",
+  "monthly": [
+    {
+      "id": "tw-monthly-revenue",
+      "title": "台灣上市櫃月營收公布截止（法規：次月 10 日前）",
+      "event_type": "taiwan_macro_industry",
+      "day": 10,
+      "status": "scheduled",
+      "source_name": "公開資訊觀測站 MOPS",
+      "source_url": "https://mops.twse.com.tw/mops/web/index",
+      "watch_points": ["各族群營收動能 YoY/MoM", "營收創高／衰退股點名", "旺季/淡季轉折"]
+    },
+    {
+      "id": "us-cpi",
+      "title": "美國 CPI 公布（約當月中；實際日期以 BLS 公告為準·推定）",
+      "event_type": "macro_inflation",
+      "day": 13,
+      "status": "推定",
+      "source_name": "US BLS（推定日期）",
+      "source_url": "https://www.bls.gov/schedule/news_release/cpi.htm",
+      "watch_points": ["通膨走勢影響 Fed 升降息預期", "牽動美債殖利率與台股評價"]
+    }
+  ],
+  "scheduled": [
+    {
+      "id": "fomc-2026-07",
+      "title": "FOMC 利率決策會議（2026/07·日期推定，以 Fed 官方行事曆為準）",
+      "event_type": "central_bank",
+      "date": "2026-07-29",
+      "status": "推定",
+      "source_name": "Federal Reserve（推定日期）",
+      "source_url": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "watch_points": ["利率決策與點陣圖", "牽動全球資金成本與台股評價"]
+    },
+    {
+      "id": "fomc-2026-09",
+      "title": "FOMC 利率決策會議（2026/09·日期推定，以 Fed 官方行事曆為準）",
+      "event_type": "central_bank",
+      "date": "2026-09-16",
+      "status": "推定",
+      "source_name": "Federal Reserve（推定日期）",
+      "source_url": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "watch_points": ["利率決策與經濟預測 SEP"]
+    },
+    {
+      "id": "tsmc-earnings-2026q2",
+      "title": "台積電 2026Q2 法說會（約 7 月中·日期推定，以公司公告為準）",
+      "event_type": "semiconductor",
+      "date": "2026-07-16",
+      "status": "推定",
+      "source_name": "TSMC IR（推定日期）",
+      "source_url": "https://investor.tsmc.com/",
+      "watch_points": ["先進製程/CoWoS 產能與展望", "全年資本支出與 AI 需求指引"]
+    },
+    {
+      "id": "semicon-taiwan-2026",
+      "title": "SEMICON Taiwan 2026 國際半導體展（約 9 月·日期推定，以主辦 SEMI 為準）",
+      "event_type": "semiconductor",
+      "date": "2026-09-09",
+      "status": "推定",
+      "source_name": "SEMI（推定日期）",
+      "source_url": "https://www.semicontaiwan.org/",
+      "watch_points": ["先進封裝/設備材料題材", "供應鏈設備商能見度"]
+    }
+  ]
+}
