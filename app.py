@@ -40,12 +40,14 @@ from config import (
     WEIGHTS_FILE,
 )
 import etf_loader
+import forecast
 import paper_trading
 from utils import format_percentage, read_json, write_json
 from state import initialize_session_state
 from components.fundamental_blocks import (
     render_fundamental_block, render_health_check_block,
     render_earnings_summary, render_three_rates, render_peer_comparison,
+    render_forecast_block,
 )
 from components.news_blocks import render_news_block
 from components.flow_blocks import render_flow_block
@@ -1517,6 +1519,24 @@ def main():
                         st.caption("⚠️ 公平價係根據過去3年PE中位數×近四季EPS估算，僅供研究，不構成投資建議。")
                     else:
                         st.caption("⚠️ EPS 公平價估算需要 FinMind 財報資料（token + 加入追蹤後自動更新）")
+
+                    # ── 前瞻推估（模型 run-rate 外推）──────────────────────
+                    # 重用本 scope 已載入的 rev_trend / fin_trend / per_trend / _fund_data / 現價，
+                    # 僅新增一次 get_eps_breakout（交叉驗證用），避免重複網路請求。
+                    st.markdown("---")
+                    try:
+                        _bko = fm_val.get_eps_breakout(selected_ticker)
+                        _fc_est = forecast.build_forward_estimates(
+                            rev_trend=rev_trend,
+                            fin_trend=fin_trend,
+                            breakout=_bko,
+                            per_trend=per_trend,
+                            close=stock.get("close"),
+                            fund=_fund_data,
+                        )
+                        render_forecast_block(_fc_est)
+                    except Exception as _fc_err:
+                        st.caption(f"⚠️ 前瞻推估暫時無法產生（資料或網路問題）：{_fc_err}")
 
 
             with _stabs[1]:  # ── 技術面（K線 + 操作區間 + 訊號）
@@ -3574,6 +3594,13 @@ def main():
         st.caption(
             "每交易日盤後由 GitHub Actions 自動執行並回存帳本；以下為長期累積結果。"
             "歷史回測不代表未來報酬，僅供策略穩定性與風險特徵參考，非投資建議。"
+        )
+        st.info(
+            "🛡️ **v1.1 選股過濾強化**：為改善 v1 容易選到小型股的問題，"
+            "紙上交易引擎已加入分層過濾——**成交量門檻**（排除流動性不足）、"
+            "**市值門檻**（排除過小型股）、**要求具備真實基本面**（有 EPS/營收資料）、"
+            "並**限定候選等級**（僅在合格候選池中輪動）。"
+            "此舉降低小型股與雜訊標的干擾，讓長期績效更能反映模型的選股能力。"
         )
 
         # ── 運作邏輯（視覺化說明）──────────────────────────────────────

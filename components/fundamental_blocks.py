@@ -418,3 +418,180 @@ def render_peer_comparison(target_ticker: str, model_df, key_prefix: str = ""):
         "（營益率/淨利率屬個股深度欄位，批次比較以毛利率代表獲利力。）"
         "數據僅供研究，不構成投資建議。"
     )
+
+
+def _fmt_assumptions(assumptions: Optional[Dict]) -> List[str]:
+    """把 forecast.py 的 assumptions dict 攤平成可讀的條列字串。"""
+    lines: List[str] = []
+    if not assumptions:
+        return lines
+    for k, v in assumptions.items():
+        if v is None:
+            continue
+        lines.append(f"{k}：{v}")
+    return lines
+
+
+def render_forecast_block(estimates: Dict):
+    """
+    前瞻推估區塊（營收 / EPS / Forward P/E）。
+
+    ⚠️ 合規：`estimates` 來自 forecast.build_forward_estimates()，
+    所有數字皆為「模型 run-rate 歷史外推」，非分析師共識/財測。
+    本區塊必須明確標示此性質、列出假設，並附下行免責。
+    """
+    if not estimates or not estimates.get("has_data"):
+        st.info(
+            "ℹ️ 目前資料不足，無法進行前瞻推估。"
+            "需要更完整的月營收與季報 EPS 歷史（請填入 FinMind token 並加入追蹤後自動更新）。"
+        )
+        return
+
+    revenue = estimates.get("revenue") or {}
+    eps = estimates.get("eps") or {}
+    eps_fy1 = estimates.get("eps_fy1") or {}
+    fwd_pe = estimates.get("forward_pe") or {}
+
+    # ── 標題 + 性質標示 ────────────────────────────────────────────
+    st.markdown("#### 🔮 前瞻推估（模型 run-rate 外推）")
+    st.caption(
+        "⚠️ 以下為**模型 run-rate 歷史外推推估，非分析師共識/財測**。"
+        "免費資料源（FinMind/yfinance）無分析師預估，此處純以歷史營收/EPS 動能外推，"
+        "僅供研究與風險評估參考，不構成投資建議。"
+    )
+
+    # ── EPS 長條圖（歷史實際 + 本年估 + FY+1 估）────────────────────
+    curr_year = eps.get("curr_year") or revenue.get("curr_year")
+    fy_eps_est = eps.get("fy_eps_est")
+    fy1_eps_est = eps_fy1.get("fy1_eps_est")
+
+    if fy_eps_est is not None or fy1_eps_est is not None:
+        st.markdown("##### 📊 年度 EPS：歷史實際 vs 推估")
+        eps_x, eps_y, eps_colors, eps_patterns = [], [], [], []
+        # 歷史年度實際 EPS（實心柱）：來自 forecast.py eps.annual_actuals
+        eps_actuals = eps.get("annual_actuals") or {}
+        for y in sorted(eps_actuals.keys()):
+            eps_x.append(str(y))
+            eps_y.append(eps_actuals[y])
+            eps_colors.append("#1f6feb")
+            eps_patterns.append("")
+        # 本年估 / FY+1 估（斜線推估柱）
+        if fy_eps_est is not None and curr_year is not None:
+            eps_x.append(f"{curr_year}(推估)")
+            eps_y.append(fy_eps_est)
+            eps_colors.append("#26a69a")
+            eps_patterns.append("/")
+        if fy1_eps_est is not None and curr_year is not None:
+            eps_x.append(f"{curr_year + 1}(推估)")
+            eps_y.append(fy1_eps_est)
+            eps_colors.append("#7ee0d0")
+            eps_patterns.append("/")
+
+        if eps_x:
+            fig_eps = go.Figure()
+            fig_eps.add_bar(
+                x=eps_x, y=eps_y,
+                marker_color=eps_colors, opacity=0.85,
+                marker_pattern=dict(shape=eps_patterns),
+                text=[f"{v:.2f}" for v in eps_y], textposition="outside",
+                name="EPS 估",
+            )
+            fig_eps.update_layout(
+                title="年度 EPS（實心=歷史實際，斜線=模型推估）",
+                height=300, margin=dict(t=40, b=20),
+                yaxis=dict(title="EPS(元)"),
+                paper_bgcolor="#0d1117", plot_bgcolor="#161b22",
+                font=dict(color="#8b949e"), showlegend=False,
+            )
+            st.plotly_chart(fig_eps, use_container_width=True)
+
+        # FY+1 保守/基準/樂觀帶
+        cons = eps_fy1.get("fy1_eps_conservative")
+        base = eps_fy1.get("fy1_eps_est")
+        opti = eps_fy1.get("fy1_eps_optimistic")
+        if any(v is not None for v in (cons, base, opti)) and curr_year is not None:
+            st.markdown(f"**{curr_year + 1} 年 EPS 推估區間（±10pp 情境帶）**")
+            bc1, bc2, bc3 = st.columns(3)
+            bc1.metric("保守", f"{cons:.2f} 元" if cons is not None else "—")
+            bc2.metric("基準", f"{base:.2f} 元" if base is not None else "—")
+            bc3.metric("樂觀", f"{opti:.2f} 元" if opti is not None else "—")
+
+    # ── 營收長條圖（歷史年度實際 + 本年估）─────────────────────────
+    fy_rev_est = revenue.get("fy_revenue_est")
+    annual_actuals = revenue.get("annual_actuals") or {}
+    rev_curr_year = revenue.get("curr_year")
+    if fy_rev_est is not None or annual_actuals:
+        st.markdown("##### 📊 年度營收：歷史實際 vs 本年估")
+        # 月營收（FinMind）單位為「千元」，換算為「億元」需 ÷ 1e5
+        rev_x, rev_y, rev_colors, rev_patterns = [], [], [], []
+        for y in sorted(annual_actuals.keys()):
+            rev_x.append(str(y))
+            rev_y.append(annual_actuals[y] / 1e5)  # 千元 → 億元
+            rev_colors.append("royalblue")
+            rev_patterns.append("")
+        if fy_rev_est is not None and rev_curr_year is not None:
+            rev_x.append(f"{rev_curr_year}(推估)")
+            rev_y.append(fy_rev_est / 1e5)
+            rev_colors.append("#8ab4f8")
+            rev_patterns.append("/")
+
+        if rev_x:
+            fig_rev = go.Figure()
+            fig_rev.add_bar(
+                x=rev_x, y=rev_y,
+                marker_color=rev_colors, opacity=0.8,
+                marker_pattern=dict(shape=rev_patterns),
+                text=[f"{v:,.0f}" for v in rev_y], textposition="outside",
+                name="年度營收",
+            )
+            fig_rev.update_layout(
+                title="年度營收（億元；斜線=本年進度追蹤推估）",
+                height=300, margin=dict(t=40, b=20),
+                yaxis=dict(title="營收(億元)"),
+                paper_bgcolor="#0d1117", plot_bgcolor="#161b22",
+                font=dict(color="#8b949e"), showlegend=False,
+            )
+            st.plotly_chart(fig_rev, use_container_width=True)
+            if revenue.get("months_reported"):
+                st.caption(
+                    f"本年已公布 {revenue['months_reported']} 個月實際，"
+                    f"剩餘月份以『去年同月 ×(1+近3月平均YoY)』推估。"
+                )
+
+    # ── Forward P/E ───────────────────────────────────────────────
+    if fwd_pe:
+        st.markdown("##### ⚖️ 前瞻本益比 Forward P/E")
+        pe1, pe2, pe3 = st.columns(3)
+        fwd_cur = fwd_pe.get("fwd_pe_cur")
+        fwd_next = fwd_pe.get("fwd_pe_next")
+        hist_med = fwd_pe.get("hist_median_pe")
+        pe1.metric("本年前瞻 PE", f"{fwd_cur:.1f} 倍" if fwd_cur is not None else "—",
+                   help="現價 ÷ 本年 EPS 估")
+        pe2.metric("FY+1 前瞻 PE", f"{fwd_next:.1f} 倍" if fwd_next is not None else "—",
+                   help="現價 ÷ 明年 EPS 估")
+        pe3.metric("歷史 PE 中位", f"{hist_med:.1f} 倍" if hist_med is not None else "—",
+                   help="近 3 年 PE 中位數，作為前瞻 PE 高低估的對照基準")
+
+        if fwd_pe.get("overvalued_warning"):
+            st.warning(
+                "🔴 " + (fwd_pe.get("warning_msg")
+                         or "前瞻本益比已明顯高於歷史中位，可能已反映樂觀預期·不宜追高。")
+            )
+
+    # ── 假設條列 ──────────────────────────────────────────────────
+    assump_lines: List[str] = []
+    for _label, _blk in [("營收估", revenue), ("EPS 估", eps),
+                         ("FY+1 EPS 估", eps_fy1), ("Forward P/E", fwd_pe)]:
+        _al = _fmt_assumptions(_blk.get("assumptions"))
+        if _al:
+            assump_lines.append(f"**{_label}**：" + "；".join(_al))
+    if assump_lines:
+        with st.expander("📋 推估假設與方法（模型參數）", expanded=False):
+            for _ln in assump_lines:
+                st.markdown(f"- {_ln}")
+
+    # ── 下行免責 ──────────────────────────────────────────────────
+    st.caption(
+        estimates.get("disclaimer")
+        or "歷史推估不代表未來，僅供研究與風險評估，不構成投資建議。"
+    )
