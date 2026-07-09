@@ -465,6 +465,24 @@ def main():
         background:#161b22; border:1px solid #30363d;
         border-radius:6px; padding:12px;
     }
+    /* ── 手機 RWD（P1）：≤640px 讓多欄指標卡換行、寬表格可橫向捲動 ── */
+    @media (max-width: 640px) {
+        /* 縮小主容器左右留白，爭取寬度 */
+        .block-container { padding-left: 0.6rem !important; padding-right: 0.6rem !important; }
+        /* st.columns 在窄螢幕自動換行，避免 5~6 欄擠成一團 */
+        [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; }
+        [data-testid="stHorizontalBlock"] > [data-testid="column"] {
+            flex: 1 1 46% !important;
+            min-width: 46% !important;
+        }
+        /* 指標卡內距縮小、字體略降 */
+        [data-testid="metric-container"] { padding: 8px !important; }
+        [data-testid="stMetricValue"] { font-size: 1.05rem !important; }
+        [data-testid="stMetricLabel"] { font-size: 0.72rem !important; }
+        .stTabs [data-baseweb="tab"] { font-size: 12px; padding: 6px 7px; }
+        /* 供應鏈族群清單固定寬表格 → 該列可橫向捲動，不再溢出畫面 */
+        .sc-row { overflow-x: auto; }
+    }
     </style>""", unsafe_allow_html=True)
 
     st.title("📈 台股盤後量化分析平台")
