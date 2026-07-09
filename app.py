@@ -50,13 +50,14 @@ from components.fundamental_blocks import (
     render_forecast_block,
 )
 from components.news_blocks import render_news_block
-from components.flow_blocks import render_flow_block
+from components.flow_blocks import render_flow_block, render_major_holder_block
 from components.technical_blocks import render_tech_block
 from components.radar_blocks import render_theme_cards, render_event_calendar, render_macro_bar
 from services.persistence_service import validate_backup, preview_backup, restore_backup
 from data_loader import MarketDataLoader
 from quant_model import QuantModel
 from finmind_loader import FinMindLoader
+from tdcc_loader import TDCCLoader
 from twse_institutional import TWSeInstitutionalLoader
 from news_analyzer import NewsAnalyzer
 from tech_analyzer import analyze as tech_analyze, INDICATOR_EXPLANATIONS
@@ -1798,6 +1799,30 @@ def main():
                         st.info("⚠️ 查無近期法人買賣資料（可能為近期無交易日或 FinMind 資料延遲）")
                 else:
                     st.info("⚠️ 個股法人歷史趨勢需要 FinMind Token。請在「⚙️ 模型設定」Tab 填入免費 Token。")
+
+                # ── 大戶 / 外資籌碼水位（免費資料，lazy 載入以控流量）───────
+                st.markdown("---")
+                st.markdown("#### 🐳 大戶／外資籌碼水位（外資每日 · 集保大戶每週）")
+                _mh_key = f"_mh_loaded_{selected_ticker}"
+                if not st.session_state.get(_mh_key):
+                    st.caption("外資持股比例（FinMind）＋集保大戶持股（TDCC，約 2MB）為選用免費資料，"
+                               "點下方按鈕再載入，避免每次都抓。")
+                    if st.button("🔍 載入大戶／外資籌碼水位", key=f"load_mh_{selected_ticker}"):
+                        st.session_state[_mh_key] = True
+                        st.rerun()
+                else:
+                    with st.spinner("載入大戶／外資籌碼..."):
+                        try:
+                            _fh = FinMindLoader(
+                                token=st.session_state.get("finmind_token", "")
+                            ).get_foreign_holding_trend(selected_ticker, days=90)
+                        except Exception:
+                            _fh = []
+                        try:
+                            _mh = TDCCLoader().get_major_holders(selected_ticker)
+                        except Exception:
+                            _mh = {"has_data": False}
+                    render_major_holder_block(_fh, _mh)
 
 
             with _stabs[3]:  # ── 新聞/筆記/信號彙整

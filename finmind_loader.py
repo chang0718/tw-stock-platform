@@ -513,6 +513,38 @@ class FinMindLoader:
         self._put(key, out)
         return out
 
+    def get_foreign_holding_trend(self, ticker: str, days: int = 90) -> List[Dict]:
+        """
+        外資持股比例趨勢（FinMind TaiwanStockShareholding，免費、每日）。
+
+        外資為台股最大法人「主力」；持股比例上升＝外資持續增持，下降＝減持。
+        此為「持股存量比例」，與 T86「當日買賣超流量」互補（一個看水位、一個看流速）。
+        回傳：[{date, foreign_ratio, foreign_shares}]，按日期排序（舊→新）。
+        """
+        key = f"foreign_hold:{ticker}"
+        cached = self._hit(key)
+        if cached is not None:
+            return cached
+
+        start = (datetime.now() - timedelta(days=days + 15)).strftime("%Y-%m-%d")
+        rows = self._api("TaiwanStockShareholding", ticker, start)
+        if not rows:
+            self._put(key, [])
+            return []
+
+        df = pd.DataFrame(rows).sort_values("date")
+        result = [
+            {
+                "date":           str(r.get("date"))[:10],
+                "foreign_ratio":  _f(r.get("ForeignInvestmentSharesRatio")),
+                "foreign_shares": _f(r.get("ForeignInvestmentShares")),
+            }
+            for _, r in df.iterrows()
+        ]
+        out = result[-days:]
+        self._put(key, out)
+        return out
+
     def get_valuation_percentile(self, ticker: str) -> Dict:
         """
         計算目前 PE/PB/DY 在歷史（3年）中的分位數

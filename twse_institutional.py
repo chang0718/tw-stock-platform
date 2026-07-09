@@ -14,6 +14,9 @@ from utils import get_retry_session
 
 _CACHE_FILE = Path("tw_quant_data/institutional_cache.json")
 _TTL = 24 * 3600  # 1天
+# 防呆：單日 T86/MI_MARGN 上市標的約 1,300~1,900 檔；若快取筆數異常膨脹
+# （舊版程式殘留或來源混雜），視為失效並重抓，避免顯示錯誤舊值。
+_MAX_ROWS = 4000
 
 
 class TWSeInstitutionalLoader:
@@ -165,7 +168,8 @@ class TWSeInstitutionalLoader:
         """
         key = "inst"
         cached = self._hit(key)
-        if cached is not None and not self._stale_for(cached, prefer_date):
+        if (cached is not None and not self._stale_for(cached, prefer_date)
+                and len(cached) <= _MAX_ROWS):
             return cached
 
         # 優先對齊行情日期，再退回最近 3 個交易日（法人資料最多延遲 1 天）
@@ -252,7 +256,8 @@ class TWSeInstitutionalLoader:
         """
         key = "margin"
         cached = self._hit(key)
-        if cached is not None and not self._stale_for(cached, prefer_date):
+        if (cached is not None and not self._stale_for(cached, prefer_date)
+                and len(cached) <= _MAX_ROWS):
             return cached
 
         for dt in self._date_candidates(prefer_date):
