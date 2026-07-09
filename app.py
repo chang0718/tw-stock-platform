@@ -2215,6 +2215,29 @@ def main():
                     st.markdown("#### 💰 籌碼")
                     render_flow_block(wl_stock.to_dict())
 
+                    # ── 大戶/外資籌碼水位（免費資料，lazy 載入）───────────
+                    st.markdown("##### 🐳 大戶／外資籌碼水位（外資每日 · 集保大戶每週）")
+                    _wmh_key = f"_wl_mh_loaded_{selected_wl}"
+                    if not st.session_state.get(_wmh_key):
+                        st.caption("外資持股比例（FinMind）＋集保大戶持股（TDCC，約 2MB）為選用免費資料，"
+                                   "點下方按鈕再載入。")
+                        if st.button("🔍 載入大戶／外資籌碼水位", key=f"load_wl_mh_{selected_wl}"):
+                            st.session_state[_wmh_key] = True
+                            st.rerun()
+                    else:
+                        with st.spinner("載入大戶／外資籌碼..."):
+                            try:
+                                _wfh = FinMindLoader(
+                                    token=st.session_state.get("finmind_token", "")
+                                ).get_foreign_holding_trend(selected_wl, days=90)
+                            except Exception:
+                                _wfh = []
+                            try:
+                                _wmh = TDCCLoader().get_major_holders(selected_wl)
+                            except Exception:
+                                _wmh = {"has_data": False}
+                        render_major_holder_block(_wfh, _wmh)
+
                     # ── 續抱評估 ─────────────────────────────────────────
                     _wl_meta  = st.session_state.watchlist.get(selected_wl, {})
                     _prev_eps = _wl_meta.get("last_seen_eps")
