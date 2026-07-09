@@ -38,6 +38,10 @@ jobs:
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
 
+      - name: Snapshot 集保大戶持股（每週累積，靠日期去重冪等）
+        run: python scripts/tdcc_snapshot.py
+        continue-on-error: true  # TDCC 暫時失敗不應中斷每日報告
+
       - name: Send daily report
         env:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
@@ -49,10 +53,10 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/paper_trading/ledger.json
+          git add data/paper_trading/ledger.json data/major_holders/history.json
           if git diff --cached --quiet; then
-            echo "帳本無變更，跳過 commit"
+            echo "帳本／大戶快照無變更，跳過 commit"
           else
-            git commit -m "chore: 紙上交易每日更新 [skip ci]"
+            git commit -m "chore: 紙上交易帳本 + 集保大戶快照每日更新 [skip ci]"
             git push
           fi

@@ -34,8 +34,10 @@ from utils import read_json, write_json
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 _TDCC_URL = "https://opendata.tdcc.com.tw/getOD.ashx?id=1-5"
-_RAW_CACHE_FILE = Path("tw_quant_data/tdcc_cache.json")           # 全市場解析後快取（1 天）
-_HISTORY_FILE = Path("tw_quant_data/major_holder_history.json")  # 逐週累積快照
+_RAW_CACHE_FILE = Path("tw_quant_data/tdcc_cache.json")   # 全市場解析後快取（1 天，ephemeral 可）
+# 逐週累積快照 → 放 tracked 路徑，供 GitHub Actions commit-back 長期保存
+# （tw_quant_data/ 為 gitignore 且雲端 ephemeral，重啟即失，故改此處）
+_HISTORY_FILE = Path("data/major_holders/history.json")
 _RAW_TTL = 24 * 3600          # 全市場 CSV 1 天內不重抓（週更新，抓一次夠）
 _MAX_WEEKS = 20               # 每檔最多保留 20 週歷史
 
@@ -95,6 +97,40 @@ class TDCCLoader:
             write_json(_RAW_CACHE_FILE, {"ts": time.time(), "data": parsed})
         return parsed
 
+    @staticmethod
+    def _ratios(levels: Dict[str, float]) -> tuple:
+        """由持股分級占比算 (ge400_ratio, ge1000_ratio)。"""
+        ge1000 = round(sum(levels.get(l, 0.0) for l in _GE1000_LEVELS), 2)
+        ge400 = round(sum(levels.get(l, 0.0) for l in _GE400_LEVELS), 2)
+        return ge400, ge1000
+
+    # ── 批次週快照（供 GitHub Actions 每週回存 tracked 歷史）────────
+
+    def bulk_snapshot(self, tickers) -> int:
+        """
+        對 tickers 抓當週大戶比例，累積進 tracked 歷史檔（依日期去重、保留最近 N 週）。
+        一次讀寫歷史檔（非逐檔），回傳本次新增的檔數。供排程呼叫。
+        """
+        alldata = self._fetch_all()
+        if not alldata:
+            return 0
+        hist = read_json(_HISTORY_FILE, {})
+        added = 0
+        for t in {str(x) for x in tickers}:
+            rec = alldata.get(t)
+            if not rec:
+                continue
+            ge400, ge1000 = self._ratios(rec.get("levels", {}))
+            date = rec.get("date", "")
+            series = hist.get(t, [])
+            if not any(s.get("date") == date for s in series):
+                series.append({"date": date, "ge400": ge400, "ge1000": ge1000})
+                hist[t] = sorted(series, key=lambda s: s.get("date", ""))[-_MAX_WEEKS:]
+                added += 1
+        if added:
+            write_json(_HISTORY_FILE, hist)
+        return added
+
     # ── 單檔大戶持股（含逐週累積趨勢）──────────────────────────────
 
     def get_major_holders(self, ticker: str) -> Dict:
@@ -105,20 +141,26 @@ class TDCCLoader:
           ge1000_ratio,          # ≥1000 張大戶占集保庫存比例%
           ge400_ratio,           # ≥400 張大戶占比%
           wow_ge1000, wow_ge400, # 對上一筆快照的週增減（pp）；無前週則 None
-          trend: [{date, ge400, ge1000}, ...]  # 本機累積（首次僅一週）
+          trend: [{date, ge400, ge1000}, ...]  # 排程累積的歷史 + 本週（唯讀，不寫檔）
         }
+
+        ⚠️ 唯讀：歷史累積由 scripts/tdcc_snapshot.py（排程）寫入 tracked 檔並 commit-back。
+        本方法僅讀取歷史 + 併入本週值供顯示，不寫檔（避免 UI 污染 tracked 工作樹）。
         """
         alldata = self._fetch_all()
         rec = alldata.get(str(ticker))
         if not rec:
             return {"has_data": False}
 
-        levels = rec.get("levels", {})
-        ge1000 = round(sum(levels.get(l, 0.0) for l in _GE1000_LEVELS), 2)
-        ge400 = round(sum(levels.get(l, 0.0) for l in _GE400_LEVELS), 2)
+        ge400, ge1000 = self._ratios(rec.get("levels", {}))
         date = rec.get("date", "")
 
-        trend = self._accumulate(str(ticker), date, ge400, ge1000)
+        # 讀已累積歷史，在記憶體併入本週（去重），不寫檔
+        hist = read_json(_HISTORY_FILE, {})
+        series = list(hist.get(str(ticker), []))
+        if not any(s.get("date") == date for s in series):
+            series.append({"date": date, "ge400": ge400, "ge1000": ge1000})
+        trend = sorted(series, key=lambda s: s.get("date", ""))[-_MAX_WEEKS:]
 
         wow_ge1000 = wow_ge400 = None
         if len(trend) >= 2:
@@ -135,14 +177,3 @@ class TDCCLoader:
             "wow_ge400": wow_ge400,
             "trend": trend,
         }
-
-    def _accumulate(self, ticker: str, date: str, ge400: float, ge1000: float) -> List[Dict]:
-        """把本週快照併入本機歷史（依日期去重、保留最近 N 週）。"""
-        hist = read_json(_HISTORY_FILE, {})
-        series = hist.get(ticker, [])
-        if not any(s.get("date") == date for s in series):
-            series.append({"date": date, "ge400": ge400, "ge1000": ge1000})
-            series = sorted(series, key=lambda s: s.get("date", ""))[-_MAX_WEEKS:]
-            hist[ticker] = series
-            write_json(_HISTORY_FILE, hist)
-        return series
